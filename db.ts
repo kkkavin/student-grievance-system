@@ -105,7 +105,9 @@ function initSchema(db: DatabaseSync) {
       new Date().toISOString()
     );
 
-    // Default sample admin
+    // Default admin account (configurable via ADMIN_EMAIL and ADMIN_PASSWORD environment variables)
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin.grievance@college.edu';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'adminpass123';
     insertUser.run(
       'admin-001',
       'ADMIN-CELL',
@@ -114,12 +116,12 @@ function initSchema(db: DatabaseSync) {
       'Other',
       'hosteller',
       '080-28904100',
-      'admin.grievance@college.edu',
+      adminEmail,
       null,
       null,
       'admin',
       1,
-      'adminpass123',
+      adminPassword,
       new Date().toISOString()
     );
   }

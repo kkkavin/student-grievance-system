@@ -15,7 +15,7 @@ export interface SendOtpResult {
 
 /**
  * Service helper to dispatch 6-digit OTP to user's email address.
- * Generates OTP via the local SQLite backend.
+ * Generates OTP via the local backend.
  * Attempts EmailJS if configured, but gracefully succeeds in local mode without requiring any API keys.
  */
 export async function sendOTPEmail({ email, name, regNo }: SendOtpParams): Promise<SendOtpResult> {
@@ -32,7 +32,7 @@ export async function sendOTPEmail({ email, name, regNo }: SendOtpParams): Promi
   }
 
   try {
-    // 2. Request OTP generation from backend (stores in SQLite & in-memory store)
+    // 2. Request OTP generation from backend (stores in memory & notification store)
     const backendRes = await fetch('/api/auth/send-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

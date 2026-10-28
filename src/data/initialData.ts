@@ -84,7 +84,7 @@ export const INITIAL_GRIEVANCES: Grievance[] = [
     status: 'pending',
     priority: 'less_important',
     isSpam: true,
-    spamReason: 'Keyboard smash & gibberish detected by Gemini AI',
+    spamReason: 'Spam',
     createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString() // 30 mins ago
   }
 ];

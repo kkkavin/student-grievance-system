@@ -15,8 +15,7 @@ import {
   Inbox,
   Filter,
   Sun,
-  Moon,
-  Layers
+  Moon
 } from 'lucide-react';
 import { UserProfile, Grievance, PriorityLevel, StudentType } from './types';
 import { INITIAL_GRIEVANCES } from './data/initialData';
@@ -69,10 +68,10 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Live complaints list from SQLite3
+  // Live complaints list
   const [grievances, setGrievances] = useState<Grievance[]>(INITIAL_GRIEVANCES);
 
-  // Fetch grievances from SQLite3 backend & periodically sync
+  // Fetch grievances from backend & periodically sync
   const loadGrievances = async () => {
     try {
       const list = await fetchGrievances();
@@ -80,13 +79,13 @@ export default function App() {
         setGrievances(list);
       }
     } catch (err) {
-      console.warn('SQLite grievances fetch notice (using current state):', err);
+      console.warn('Grievances fetch notice (using current state):', err);
     }
   };
 
   useEffect(() => {
     loadGrievances();
-    // Poll every 4s for fresh updates from SQLite backend
+    // Poll every 4s for fresh updates from backend
     const interval = setInterval(loadGrievances, 4000);
     return () => clearInterval(interval);
   }, []);
@@ -113,7 +112,7 @@ export default function App() {
     }, 8000);
   };
 
-  // Admin marks complaint priority in SQLite3
+  // Admin marks complaint priority
   const handleUpdatePriority = async (id: string, priority: PriorityLevel) => {
     setGrievances((prev) =>
       prev.map((g) => (g.id === id ? { ...g, priority } : g))
@@ -122,11 +121,11 @@ export default function App() {
     try {
       await updateGrievanceApi(id, { priority });
     } catch (err) {
-      console.warn('SQLite priority update fallback:', err);
+      console.warn('Priority update fallback:', err);
     }
   };
 
-  // Admin marks complaint "Done" in SQLite3 and dispatches automated notice
+  // Admin marks complaint "Done" and dispatches automated notice
   const handleMarkDone = async (id: string, customResolutionNote?: string) => {
     const target = grievances.find((g) => g.id === id);
     if (!target) return;
@@ -145,7 +144,7 @@ export default function App() {
       prev.map((g) => (g.id === id ? updatedTicket : g))
     );
 
-    // Update in SQLite3
+    // Update database
     try {
       await updateGrievanceApi(id, {
         status: 'resolved',
@@ -153,7 +152,7 @@ export default function App() {
         adminNotes,
       });
     } catch (err) {
-      console.warn('SQLite mark done update fallback:', err);
+      console.warn('Mark done update fallback:', err);
     }
 
     // Trigger automated resolution notification
@@ -172,6 +171,32 @@ export default function App() {
       });
     } catch (err) {
       console.warn('Failed to send resolution email:', err);
+    }
+  };
+
+  // Admin re-opens complaint
+  const handleReopen = async (id: string) => {
+    const target = grievances.find((g) => g.id === id);
+    if (!target) return;
+
+    const updatedTicket: Grievance = {
+      ...target,
+      status: 'pending',
+      resolvedAt: undefined,
+    };
+
+    setGrievances((prev) =>
+      prev.map((g) => (g.id === id ? updatedTicket : g))
+    );
+
+    // Update database
+    try {
+      await updateGrievanceApi(id, {
+        status: 'pending',
+        resolvedAt: null as any,
+      });
+    } catch (err) {
+      console.warn('Reopen update fallback:', err);
     }
   };
 
@@ -223,19 +248,6 @@ export default function App() {
 
           {/* Top Right: Dark Mode Toggle + Profile UI / Login Controls */}
           <div className="flex items-center gap-2.5 sm:gap-3">
-            {/* GRAPHIFY CODE KNOWLEDGE GRAPH BUTTON */}
-            <a
-              id="graphify-link-btn"
-              href="/graph"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs font-semibold transition-colors border border-indigo-200 dark:border-indigo-800 shadow-2xs"
-              title="Open Graphify Interactive Architecture & Knowledge Graph"
-            >
-              <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>Knowledge Graph</span>
-            </a>
-
             {/* DARK MODE TOGGLE BUTTON */}
             <button
               id="dark-mode-toggle-btn"
@@ -366,6 +378,7 @@ export default function App() {
             grievances={grievances}
             onUpdatePriority={handleUpdatePriority}
             onMarkDone={handleMarkDone}
+            onReopen={handleReopen}
           />
         )}
 
@@ -513,7 +526,7 @@ export default function App() {
             try {
               await saveUserApi(updatedUser);
             } catch (err) {
-              console.warn('SQLite profile update fallback:', err);
+              console.warn('Profile update fallback:', err);
             }
             setSuccessBanner('Profile information updated successfully!');
             setTimeout(() => setSuccessBanner(null), 4000);
@@ -563,7 +576,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
           <div className="flex items-center gap-2">
             <GraduationCap className="w-4 h-4 text-blue-600" />
-            <span className="font-semibold text-slate-700">Student Grievance Redressal System (SQLite3)</span>
+            <span className="font-semibold text-slate-700">Student Grievance Redressal System</span>
           </div>
         </div>
       </footer>

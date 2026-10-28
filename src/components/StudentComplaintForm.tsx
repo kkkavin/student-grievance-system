@@ -100,7 +100,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
         createdAt: new Date().toISOString()
       };
 
-      // Persist in SQLite3 via backend REST API
+      // Persist grievance via backend REST API
       const savedGrievance = await createGrievanceApi(grievancePayload);
 
       // Trigger automated confirmation email

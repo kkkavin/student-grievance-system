@@ -1,9 +1,9 @@
 {
   "db.ts": {
-    "mtime": 1793164693.6335802,
-    "seen": 1793167067.1949158,
-    "ast_hash": "3dcddeba119498094e27f2335364f6e2",
-    "semantic_hash": "3dcddeba119498094e27f2335364f6e2"
+    "mtime": 1793184705.85414,
+    "seen": 1793184758.1644192,
+    "ast_hash": "041457ab5f6b87eda912fc6d23661e6e",
+    "semantic_hash": ""
   },
   "firebase-applet-config.json": {
     "mtime": 1793163473.0151029,
@@ -27,21 +27,21 @@
     "ast_empty": true
   },
   "package.json": {
-    "mtime": 1793167497.6272888,
-    "seen": 1793167672.4870477,
-    "ast_hash": "758852c5f1899e03b179dde9fc5dfcd4",
+    "mtime": 1793181629.1966324,
+    "seen": 1793181711.6949115,
+    "ast_hash": "a3b587994b960b547b4ef2f567ad5d6e",
     "semantic_hash": ""
   },
   "server.ts": {
     "mtime": 1793167517.1365728,
-    "seen": 1793167672.4870477,
+    "seen": 1793174522.3260293,
     "ast_hash": "cdc6ace97addb1c5e46b5f98bc50407d",
-    "semantic_hash": ""
+    "semantic_hash": "cdc6ace97addb1c5e46b5f98bc50407d"
   },
   "src/App.tsx": {
-    "mtime": 1793167549.3021262,
-    "seen": 1793167672.4870477,
-    "ast_hash": "35a1dd29cb1e758ba0588efbc74cc531",
+    "mtime": 1793184420.9286704,
+    "seen": 1793184464.084352,
+    "ast_hash": "448c4dc97c61d01901852a40365f876f",
     "semantic_hash": ""
   },
   "src/api.ts": {
@@ -51,16 +51,16 @@
     "semantic_hash": "8de265911087b7786447b5e5f755ff92"
   },
   "src/components/AdminDashboard.tsx": {
-    "mtime": 1793167625.5861697,
-    "seen": 1793167672.4870477,
-    "ast_hash": "64b41c453b5347d49ed3c6d36bc983ae",
+    "mtime": 1793183863.9449587,
+    "seen": 1793183884.7585225,
+    "ast_hash": "35deaca6248844e6e8306c229d758932",
     "semantic_hash": ""
   },
   "src/components/AuthModal.tsx": {
-    "mtime": 1793165061.5881076,
-    "seen": 1793167067.1979413,
-    "ast_hash": "a04fd81c0d3949e10c6b09b93913770f",
-    "semantic_hash": "a04fd81c0d3949e10c6b09b93913770f"
+    "mtime": 1793184665.9088666,
+    "seen": 1793184758.1644192,
+    "ast_hash": "5d3eb7dca5e0dce1011269e3f1c07e9d",
+    "semantic_hash": ""
   },
   "src/components/FAQSection.tsx": {
     "mtime": 1793163473.0231006,
@@ -75,10 +75,10 @@
     "semantic_hash": "3acbbcdee1fb342804acda288f114ac9"
   },
   "src/components/StudentComplaintForm.tsx": {
-    "mtime": 1793164981.0120063,
-    "seen": 1793167067.1989408,
-    "ast_hash": "2ba4ec2bd9c826334c8ce17d12276b87",
-    "semantic_hash": "2ba4ec2bd9c826334c8ce17d12276b87"
+    "mtime": 1793175592.0553358,
+    "seen": 1793175684.5282407,
+    "ast_hash": "fba53960cef8419d06b9225ceb20412a",
+    "semantic_hash": ""
   },
   "src/data/constants.ts": {
     "mtime": 1793163473.0251286,
@@ -87,10 +87,10 @@
     "semantic_hash": "ed2f3b551d636f641a06976498a8ba10"
   },
   "src/data/initialData.ts": {
-    "mtime": 1793163473.0261018,
-    "seen": 1793167067.1999416,
-    "ast_hash": "f658cc18e413a360ac19e5e95e31f039",
-    "semantic_hash": "f658cc18e413a360ac19e5e95e31f039"
+    "mtime": 1793181445.5771418,
+    "seen": 1793181711.6949115,
+    "ast_hash": "aeb2fbd97b242da313aa80b5aee96425",
+    "semantic_hash": ""
   },
   "src/main.tsx": {
     "mtime": 1793163473.0270996,
@@ -99,10 +99,10 @@
     "semantic_hash": "a0bcc3ffa5e95e1965f94969ab488283"
   },
   "src/services/sendEmailOTP.ts": {
-    "mtime": 1793164827.9912293,
-    "seen": 1793167067.200941,
-    "ast_hash": "2481bf85d7976ee87848fe99400ba2b4",
-    "semantic_hash": "2481bf85d7976ee87848fe99400ba2b4"
+    "mtime": 1793175602.784792,
+    "seen": 1793175684.5282407,
+    "ast_hash": "bdcc97a98818c187b76dad7549a3931c",
+    "semantic_hash": ""
   },
   "src/types.ts": {
     "mtime": 1793163473.029104,
@@ -129,21 +129,51 @@
     "semantic_hash": "cfc596836379397756c305b60b69ba06"
   },
   "README.md": {
-    "mtime": 1793167700.2442708,
-    "seen": 1793167724.7124867,
-    "ast_hash": "d643d14f102d9346ab74b733197f0514",
+    "mtime": 1793184717.237756,
+    "seen": 1793184758.1644192,
+    "ast_hash": "0dd2d424ee946bc243264e0433999483",
     "semantic_hash": ""
   },
   "index.html": {
     "mtime": 1793163473.0181017,
-    "seen": 1793167672.4870477,
+    "seen": 1793174522.333072,
     "ast_hash": "97f2266e5cc98db0aa30bd36458116bb",
+    "semantic_hash": "97f2266e5cc98db0aa30bd36458116bb"
+  },
+  ".claude/settings.json": {
+    "mtime": 1793173923.818424,
+    "seen": 1793174522.3241837,
+    "ast_hash": "4fba65909a85ef6f7e59ed37c3138526",
+    "semantic_hash": "4fba65909a85ef6f7e59ed37c3138526"
+  },
+  "src/components/Charts.tsx": {
+    "mtime": 1793183844.0936332,
+    "seen": 1793183884.7585225,
+    "ast_hash": "31f82ae8512360707f9013bd45c3a179",
+    "semantic_hash": ""
+  },
+  "src/components/ReportDownloader.tsx": {
+    "mtime": 1793183886.032241,
+    "seen": 1793183926.078533,
+    "ast_hash": "b9093c3d5e5fffbb1e6b5a795078cbae",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1793173923.815848,
+    "seen": 1793174522.333072,
+    "ast_hash": "67d88e9d0760c3ba54c75dfd9551c1c5",
+    "semantic_hash": "67d88e9d0760c3ba54c75dfd9551c1c5"
+  },
+  ".claude/CLAUDE.md": {
+    "mtime": 1793173923.8119047,
+    "seen": 1793175220.20192,
+    "ast_hash": "9b31786b637be3c13978bec4c2330752",
     "semantic_hash": ""
   },
   "package-lock.json": {
-    "mtime": 1793163850.0268812,
-    "seen": 1793167672.4870477,
-    "ast_hash": "374f04d650d8a695925d30a48f6a46da",
+    "mtime": 1793181629.299975,
+    "seen": 1793181711.6949115,
+    "ast_hash": "c9202bbfc7815830770e05503e38236d",
     "semantic_hash": ""
   }
 }

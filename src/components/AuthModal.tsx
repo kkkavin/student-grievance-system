@@ -34,9 +34,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  // Admin login state
-  const [adminEmail, setAdminEmail] = useState('admin.grievance@college.edu');
-  const [adminPassword, setAdminPassword] = useState('adminpass123');
+  // Admin login state (unpopulated by default for security)
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
 
   // Signup form state
   const [signupRegNo, setSignupRegNo] = useState('');
@@ -74,7 +74,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
 
   if (!isOpen) return null;
 
-  // Handle student login with Reg No + Password via SQLite
+  // Handle student login with Reg No + Password
   const handleStudentLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -91,7 +91,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
     }
   };
 
-  // Handle Admin login via SQLite
+  // Handle Admin login
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -102,7 +102,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
       onSuccess(user);
     } catch (err: any) {
       console.error('Admin login error:', err);
-      setLoginError(err?.message || 'Invalid Admin credentials. Try admin.grievance@college.edu / adminpass123');
+      setLoginError(err?.message || 'Invalid Admin credentials or unauthorized access.');
     } finally {
       setLoading(false);
     }
@@ -185,7 +185,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
     }
   };
 
-  // Step 2 of Signup: Verify OTP and create SQLite profile
+  // Step 2 of Signup: Verify OTP and create profile
   const handleVerifyOtpAndRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -223,7 +223,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
         createdAt: new Date().toISOString()
       };
 
-      // 3. Save into SQLite via API
+      // 3. Save via API
       const savedUser = await saveUserApi({
         ...newUser,
         password,
@@ -260,7 +260,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
             </div>
             <div>
               <h2 className="text-xl font-bold tracking-tight">AI Student Grievance Portal</h2>
-              <p className="text-xs text-blue-200/90 mt-0.5">Campus Redressal & Anti-Ragging Cell &bull; SQLite3 Local Mode</p>
+              <p className="text-xs text-blue-200/90 mt-0.5">Campus Redressal & Anti-Ragging Cell</p>
             </div>
           </div>
 
@@ -375,7 +375,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
                 disabled={loading}
                 className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
               >
-                {loading ? 'Authenticating with SQLite...' : 'Sign In as Student'}
+                {loading ? 'Authenticating...' : 'Sign In as Student'}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </form>
@@ -387,7 +387,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
               <div className="flex items-center gap-2 p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 rounded-xl text-xs text-indigo-900 dark:text-indigo-300">
                 <Shield className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                 <span>
-                  Admin Demo: <strong className="font-mono">admin.grievance@college.edu</strong> / Password: <strong className="font-mono">adminpass123</strong>
+                  Authorized personnel only. Please sign in with your administrative credentials.
                 </span>
               </div>
 
@@ -401,6 +401,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
                     id="admin-email-input"
                     type="email"
                     required
+                    placeholder="admin@college.edu"
                     value={adminEmail}
                     onChange={(e) => setAdminEmail(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
@@ -418,6 +419,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
                     id="admin-password-input"
                     type="password"
                     required
+                    placeholder="Enter admin password"
                     value={adminPassword}
                     onChange={(e) => setAdminPassword(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
@@ -724,7 +726,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
                       disabled={loading}
                       className="flex-2 py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
                     >
-                      {loading ? 'Verifying with SQLite...' : 'Verify OTP & Enter'}
+                      {loading ? 'Verifying OTP...' : 'Verify OTP & Enter'}
                       <CheckCircle2 className="w-3.5 h-3.5" />
                     </button>
                   </div>

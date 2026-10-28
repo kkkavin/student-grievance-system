@@ -29,8 +29,7 @@ The application will start immediately at:
 - *(Or sign up with any new registration number using the automated local OTP verification)*
 
 ### Administrator Login
-- **Email:** `admin.grievance@college.edu`
-- **Password:** `adminpass123`
+- Securely configured for authorized personnel (configurable via `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables). Login credentials are kept private and not exposed on public UI views.
 
 ---
 

@@ -12,4 +12,9 @@ coverage/
 # Graphify
 graphify-out/cache/
 graphify-out/.*
-!graphify-out/.graphify_root
+graphify-out/[0-9]*/
+graphify-out/cost.json
+!.graphify_root
+
+# Tooling local configs
+.claude/
