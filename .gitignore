@@ -4,5 +4,12 @@ dist/
 coverage/
 .DS_Store
 *.log
+*.sqlite*
+*.db
 .env*
 !.env.example
+
+# Graphify
+graphify-out/cache/
+graphify-out/.*
+!graphify-out/.graphify_root

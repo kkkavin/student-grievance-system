@@ -8,8 +8,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, Grievance } from '../types';
 import { HOSTELLER_CATEGORIES, DAYSCHOLAR_CATEGORIES } from '../data/constants';
-import { db, cleanFirestoreData } from '../firebase';
-import { collection, addDoc } from 'firebase/firestore';
+import { createGrievanceApi } from '../api';
 
 interface StudentComplaintFormProps {
   user: UserProfile;
@@ -47,7 +46,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
     setSubmitting(true);
 
     try {
-      // Send to AI Spam Classifier endpoint
+      // Send to local AI Spam Classifier endpoint (works 100% locally with zero API key)
       let aiResult = {
         isSpam: false,
         reason: 'Legitimate student complaint',
@@ -81,7 +80,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
 
       const ticketNo = `GRV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-      const grievanceData: Grievance = {
+      const grievancePayload: Grievance = {
         id: 'tkt_' + Math.random().toString(36).substring(2, 9),
         ticketNo,
         studentRegNo: user.regNo || 'STUDENT',
@@ -91,7 +90,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
         studentType: user.studentType || 'dayscholar',
         hostelBlock: user.studentType === 'hosteller' ? (user.hostelBlock || 'Block A') : undefined,
         roomNo: user.studentType === 'hosteller' ? (user.roomNo || 'N/A') : undefined,
-        category,
+        category: aiResult.suggestedCategory || category,
         description: trimmed,
         status: 'pending',
         priority: category.includes('Ragging') ? 'urgent' : 'medium',
@@ -101,16 +100,27 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
         createdAt: new Date().toISOString()
       };
 
-      // Persist in Firebase Firestore
+      // Persist in SQLite3 via backend REST API
+      const savedGrievance = await createGrievanceApi(grievancePayload);
+
+      // Trigger automated confirmation email
       try {
-        const firestorePayload = cleanFirestoreData(grievanceData);
-        const docRef = await addDoc(collection(db, 'grievances'), firestorePayload);
-        grievanceData.id = docRef.id;
-      } catch (fErr) {
-        console.warn('Firestore write fallback:', fErr);
+        await fetch('/api/notifications/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: savedGrievance.studentEmail,
+            type: 'confirmation',
+            ticketNo: savedGrievance.ticketNo,
+            studentName: savedGrievance.studentName,
+            category: savedGrievance.category,
+          }),
+        });
+      } catch (notifErr) {
+        console.warn('Notification notice:', notifErr);
       }
 
-      onSubmitSuccess(grievanceData);
+      onSubmitSuccess(savedGrievance);
     } catch (err: any) {
       setErrorMsg('Failed to submit grievance: ' + (err?.message || 'Unknown error'));
     } finally {

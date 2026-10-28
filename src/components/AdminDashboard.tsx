@@ -234,6 +234,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
             <div className="text-[10px] uppercase tracking-wider text-emerald-200">Resolved</div>
           </button>
+          <a
+            id="btn-architecture-graph"
+            href="/graph"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 px-4 py-2 rounded-xl text-center border border-indigo-400/40 transition-all flex flex-col items-center justify-center cursor-pointer"
+            title="Open Graphify Codebase Knowledge Graph"
+          >
+            <div className="flex items-center gap-1.5 text-sm font-bold text-white">
+              <Layers className="w-4 h-4 text-indigo-300" />
+              <span>Graph</span>
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-indigo-200">Architecture</div>
+          </a>
         </div>
       </div>
 

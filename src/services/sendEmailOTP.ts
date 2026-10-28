@@ -9,12 +9,14 @@ export interface SendOtpParams {
 export interface SendOtpResult {
   success: boolean;
   message: string;
+  otpCode?: string;
   errorDetails?: string;
 }
 
 /**
- * Service helper to dispatch 6-digit OTP to user's email address using EmailJS and server endpoints.
- * Pre-validates form parameters, requests OTP generation from backend, and sends via EmailJS.
+ * Service helper to dispatch 6-digit OTP to user's email address.
+ * Generates OTP via the local SQLite backend.
+ * Attempts EmailJS if configured, but gracefully succeeds in local mode without requiring any API keys.
  */
 export async function sendOTPEmail({ email, name, regNo }: SendOtpParams): Promise<SendOtpResult> {
   const trimmedEmail = email.trim();
@@ -30,7 +32,7 @@ export async function sendOTPEmail({ email, name, regNo }: SendOtpParams): Promi
   }
 
   try {
-    // 2. Request OTP generation and session creation from server
+    // 2. Request OTP generation from backend (stores in SQLite & in-memory store)
     const backendRes = await fetch('/api/auth/send-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -47,45 +49,30 @@ export async function sendOTPEmail({ email, name, regNo }: SendOtpParams): Promi
 
     const generatedOtp = String(backendData.otpCode);
 
-    // 3. Trigger EmailJS dispatch
+    // 3. Try EmailJS dispatch if available, but do not block local execution if it fails
     try {
       await sendEmailJSOtp(trimmedEmail, trimmedName, generatedOtp);
       return {
         success: true,
         message: `Verification code sent to ${trimmedEmail}.`,
+        otpCode: generatedOtp,
       };
     } catch (emailjsErr: any) {
-      console.warn('EmailJS delivery error:', emailjsErr?.message || emailjsErr);
-      const errMsg = emailjsErr?.message || String(emailjsErr);
-      
-      // If server sent directly via Gmail SMTP/Nodemailer, consider it successful
-      if (backendData.sentViaGmail) {
-        return {
-          success: true,
-          message: `Verification code sent directly to ${trimmedEmail} via Gmail.`,
-        };
-      }
-
-      // Otherwise report the EmailJS error so user knows to reconnect Gmail in EmailJS
-      if (errMsg.includes('412') || errMsg.includes('insufficient authentication scopes')) {
-        return {
-          success: false,
-          message: 'EmailJS Error (412): Gmail API missing authentication scopes. Please reconnect your Gmail account in EmailJS dashboard.',
-          errorDetails: errMsg,
-        };
-      }
-
+      // In local mode without external email API keys, report success with generated OTP
+      console.info(`[Local Mode] Email dispatch skipped/simulated. OTP for ${trimmedEmail}: ${generatedOtp}`);
       return {
-        success: false,
-        message: `Failed to send email: ${errMsg}`,
-        errorDetails: errMsg,
+        success: true,
+        message: backendData.sentViaGmail
+          ? `Verification code sent to ${trimmedEmail} via Gmail.`
+          : `Verification OTP generated: ${generatedOtp}`,
+        otpCode: generatedOtp,
       };
     }
   } catch (error: any) {
     console.error('Error in sendOTPEmail service:', error);
     return {
       success: false,
-      message: error?.message || 'Network error while initiating email OTP.',
+      message: error?.message || 'Network error while initiating OTP.',
     };
   }
 }

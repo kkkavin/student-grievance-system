@@ -15,7 +15,8 @@ import {
   Inbox,
   Filter,
   Sun,
-  Moon
+  Moon,
+  Layers
 } from 'lucide-react';
 import { UserProfile, Grievance, PriorityLevel, StudentType } from './types';
 import { INITIAL_GRIEVANCES } from './data/initialData';
@@ -25,8 +26,7 @@ import { StudentComplaintForm } from './components/StudentComplaintForm';
 import { AdminDashboard } from './components/AdminDashboard';
 import { FAQSection } from './components/FAQSection';
 import { ProfileModal } from './components/ProfileModal';
-import { db, cleanFirestoreData } from './firebase';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { fetchGrievances, updateGrievanceApi, saveUserApi } from './api';
 
 export default function App() {
   // Current user state (persisted across page reloads via localStorage)
@@ -69,94 +69,29 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Live complaints list
+  // Live complaints list from SQLite3
   const [grievances, setGrievances] = useState<Grievance[]>(INITIAL_GRIEVANCES);
 
-  // Connect to Firestore real-time snapshot listener with complete deduplication & cleanup
-  useEffect(() => {
+  // Fetch grievances from SQLite3 backend & periodically sync
+  const loadGrievances = async () => {
     try {
-      const q = query(collection(db, 'grievances'));
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          const initialMap = new Map(INITIAL_GRIEVANCES.map((g) => [g.id, g]));
-
-          if (!snapshot.empty) {
-            const firestoreList: Grievance[] = [];
-            snapshot.forEach((d) => {
-              const data = d.data() as Partial<Grievance>;
-              const initial = initialMap.get(d.id);
-
-              const inferredStudentType: StudentType =
-                (data.studentType as StudentType) ||
-                (data.category && DAYSCHOLAR_CATEGORIES.includes(data.category)
-                  ? 'dayscholar'
-                  : initial?.studentType || 'dayscholar');
-
-              // Merge initial default values with Firestore document data
-              const fullDoc: Grievance = {
-                id: d.id,
-                ticketNo: data.ticketNo || initial?.ticketNo || `GRV-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-                studentRegNo: data.studentRegNo || initial?.studentRegNo || '2026DS' + d.id.substring(0, 4).toUpperCase(),
-                studentName: data.studentName || initial?.studentName || 'Student',
-                studentEmail: data.studentEmail || initial?.studentEmail || 'student@college.edu',
-                studentPhone: data.studentPhone || initial?.studentPhone || '9876543210',
-                studentType: inferredStudentType,
-                hostelBlock: data.hostelBlock || initial?.hostelBlock,
-                roomNo: data.roomNo || initial?.roomNo,
-                category: data.category || initial?.category || 'Others',
-                description: data.description || initial?.description || '(No description content)',
-                status: data.status || initial?.status || 'pending',
-                priority: data.priority || initial?.priority || 'medium',
-                isSpam: typeof data.isSpam === 'boolean' ? data.isSpam : (initial?.isSpam ?? false),
-                spamReason: data.spamReason || initial?.spamReason,
-                aiClassification: data.aiClassification || initial?.aiClassification,
-                createdAt: data.createdAt || initial?.createdAt || new Date().toISOString(),
-                resolvedAt: data.resolvedAt || initial?.resolvedAt,
-                adminNotes: data.adminNotes || initial?.adminNotes,
-              };
-
-              firestoreList.push(fullDoc);
-            });
-
-            // Map for deduplication keyed by ticketNo & id
-            const ticketMap = new Map<string, Grievance>();
-
-            // 1. Add Firestore items first (highest precedence)
-            firestoreList.forEach((g) => {
-              const ticketKey = g.ticketNo ? g.ticketNo.trim().toUpperCase() : g.id;
-              ticketMap.set(ticketKey, g);
-              ticketMap.set(g.id, g);
-            });
-
-            // 2. Add INITIAL_GRIEVANCES only if neither ticketNo nor id exists in ticketMap
-            INITIAL_GRIEVANCES.forEach((initG) => {
-              const ticketKey = initG.ticketNo ? initG.ticketNo.trim().toUpperCase() : initG.id;
-              if (!ticketMap.has(initG.id) && !ticketMap.has(ticketKey)) {
-                ticketMap.set(initG.id, initG);
-                ticketMap.set(ticketKey, initG);
-              }
-            });
-
-            // Extract unique grievance objects
-            const dedupedList = Array.from(new Set(ticketMap.values()));
-
-            setGrievances(dedupedList);
-          } else {
-            setGrievances(INITIAL_GRIEVANCES);
-          }
-        },
-        (error) => {
-          console.warn('Firestore snapshot error (using local buffer):', error);
-        }
-      );
-      return () => unsubscribe();
+      const list = await fetchGrievances();
+      if (Array.isArray(list) && list.length > 0) {
+        setGrievances(list);
+      }
     } catch (err) {
-      console.warn('Firestore subscription failed, running locally:', err);
+      console.warn('SQLite grievances fetch notice (using current state):', err);
     }
+  };
+
+  useEffect(() => {
+    loadGrievances();
+    // Poll every 4s for fresh updates from SQLite backend
+    const interval = setInterval(loadGrievances, 4000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Handle student submitted complaint with deduplication
+  // Handle student submitted complaint
   const handleGrievanceSubmitted = (newTicket: Grievance) => {
     setGrievances((prev) => {
       const existingKeys = new Set(
@@ -170,7 +105,7 @@ export default function App() {
     });
     setActiveView('home');
     setSuccessBanner(
-      `Grievance ticket #${newTicket.ticketNo} registered successfully! An automated confirmation email has been dispatched to ${newTicket.studentEmail}.`
+      `Grievance ticket #${newTicket.ticketNo} registered successfully!`
     );
     // Auto-dismiss banner after 8s
     setTimeout(() => {
@@ -178,54 +113,50 @@ export default function App() {
     }, 8000);
   };
 
-  // Admin marks complaint priority
+  // Admin marks complaint priority in SQLite3
   const handleUpdatePriority = async (id: string, priority: PriorityLevel) => {
-    let targetGrievance: Grievance | undefined;
-
     setGrievances((prev) =>
-      prev.map((g) => {
-        if (g.id === id) {
-          targetGrievance = { ...g, priority };
-          return targetGrievance;
-        }
-        return g;
-      })
+      prev.map((g) => (g.id === id ? { ...g, priority } : g))
     );
 
-    if (targetGrievance) {
-      try {
-        await setDoc(doc(db, 'grievances', id), cleanFirestoreData(targetGrievance), { merge: true });
-      } catch (err) {
-        console.warn('Firestore priority update fallback:', err);
-      }
+    try {
+      await updateGrievanceApi(id, { priority });
+    } catch (err) {
+      console.warn('SQLite priority update fallback:', err);
     }
   };
 
-  // Admin marks complaint "Done" and dispatches automated email
+  // Admin marks complaint "Done" in SQLite3 and dispatches automated notice
   const handleMarkDone = async (id: string, customResolutionNote?: string) => {
     const target = grievances.find((g) => g.id === id);
     if (!target) return;
 
     const resolvedAt = new Date().toISOString();
+    const adminNotes = customResolutionNote || 'Resolved by administration.';
+
     const updatedTicket: Grievance = {
       ...target,
       status: 'resolved',
       resolvedAt,
-      adminNotes: customResolutionNote || 'Resolved by administration.'
+      adminNotes,
     };
 
     setGrievances((prev) =>
       prev.map((g) => (g.id === id ? updatedTicket : g))
     );
 
-    // Update Firestore with complete object
+    // Update in SQLite3
     try {
-      await setDoc(doc(db, 'grievances', id), cleanFirestoreData(updatedTicket), { merge: true });
+      await updateGrievanceApi(id, {
+        status: 'resolved',
+        resolvedAt,
+        adminNotes,
+      });
     } catch (err) {
-      console.warn('Firestore mark done update fallback:', err);
+      console.warn('SQLite mark done update fallback:', err);
     }
 
-    // Trigger automated resolution email
+    // Trigger automated resolution notification
     try {
       await fetch('/api/notifications/send', {
         method: 'POST',
@@ -251,7 +182,7 @@ export default function App() {
     setActiveView('home');
   };
 
-  // Filter and reverse-chronologically sort complaints for current student (newest / most recently resolved first)
+  // Filter and reverse-chronologically sort complaints for current student
   const studentGrievances = grievances
     .filter(
       (g) => currentUser && (g.studentRegNo === currentUser.regNo || g.studentEmail === currentUser.email)
@@ -292,6 +223,19 @@ export default function App() {
 
           {/* Top Right: Dark Mode Toggle + Profile UI / Login Controls */}
           <div className="flex items-center gap-2.5 sm:gap-3">
+            {/* GRAPHIFY CODE KNOWLEDGE GRAPH BUTTON */}
+            <a
+              id="graphify-link-btn"
+              href="/graph"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs font-semibold transition-colors border border-indigo-200 dark:border-indigo-800 shadow-2xs"
+              title="Open Graphify Interactive Architecture & Knowledge Graph"
+            >
+              <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Knowledge Graph</span>
+            </a>
+
             {/* DARK MODE TOGGLE BUTTON */}
             <button
               id="dark-mode-toggle-btn"
@@ -439,7 +383,7 @@ export default function App() {
                   Have a problem on campus or in your hostel?
                 </h1>
                 <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
-                  Lodge complaints regarding hostel damages, water leakage, Wi-Fi, mess food, bus routes, or any college trouble. Our automated AI triage prioritizes authentic issues directly with management.
+                  Lodge complaints regarding hostel damages, water leakage, Wi-Fi, mess food, bus routes, or any college trouble. Our automated local triage prioritizes authentic issues directly with management.
                 </p>
 
                 {/* THE MANDATED STUDENT COMPLAINT BUTTON */}
@@ -567,11 +511,9 @@ export default function App() {
             setCurrentUser(updatedUser);
             localStorage.setItem('grievance_portal_user', JSON.stringify(updatedUser));
             try {
-              if (updatedUser.regNo) {
-                await setDoc(doc(db, 'users', updatedUser.regNo), cleanFirestoreData(updatedUser), { merge: true });
-              }
+              await saveUserApi(updatedUser);
             } catch (err) {
-              console.warn('Firestore profile update fallback:', err);
+              console.warn('SQLite profile update fallback:', err);
             }
             setSuccessBanner('Profile information updated successfully!');
             setTimeout(() => setSuccessBanner(null), 4000);
@@ -621,7 +563,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
           <div className="flex items-center gap-2">
             <GraduationCap className="w-4 h-4 text-blue-600" />
-            <span className="font-semibold text-slate-700">AI Student Grievance Redressal System</span>
+            <span className="font-semibold text-slate-700">Student Grievance Redressal System (SQLite3)</span>
           </div>
         </div>
       </footer>
