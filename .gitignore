@@ -18,3 +18,18 @@ graphify-out/cost.json
 
 # Tooling local configs
 .claude/
+
+# Project report files
+*.pdf
+mini_project_report.html
+report_assets/
+extracted_images/
+anna_univ_logo.png
+sona_logo.png
+build_full_report.py
+create_svgs.py
+check_pages.py
+check_pdf.py
+analyze_sheets.py
+verify_report.py
+.chrome_tmp/

@@ -410,10 +410,13 @@ export default function App() {
                         setActiveView('new_complaint');
                       }
                     }}
-                    className="px-6 py-3.5 bg-blue-500 hover:bg-blue-600 text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center gap-2.5 cursor-pointer transform hover:-translate-y-0.5"
+                    className="relative group px-6 py-3.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600 hover:from-blue-400 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-sm rounded-2xl shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 transition-all flex items-center gap-2.5 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
                   >
-                    <PlusCircle className="w-5 h-5" />
-                    <span>Student Complaint Button</span>
+                    <PlusCircle className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
+                    <span>Lodge Complaint</span>
+                    <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-white/20 text-white/95">
+                      AI Triage
+                    </span>
                   </button>
                 </div>
               </div>
@@ -426,7 +429,7 @@ export default function App() {
 
             {/* Student's Past Submitted Complaints Tracking */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                     Your Lodged Grievances
@@ -436,18 +439,51 @@ export default function App() {
                   </p>
                 </div>
 
-                <span className="text-xs font-mono font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-1 rounded-lg border border-blue-100 dark:border-blue-900">
-                  {studentGrievances.length} Tickets Registered
-                </span>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={() => {
+                      if (!currentUser) {
+                        setIsAuthModalOpen(true);
+                      } else {
+                        setActiveView('new_complaint');
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>New Complaint</span>
+                  </button>
+
+                  <span className="text-xs font-mono font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-1.5 rounded-xl border border-blue-100 dark:border-blue-900">
+                    {studentGrievances.length} Registered
+                  </span>
+                </div>
               </div>
 
               {studentGrievances.length === 0 ? (
-                <div className="p-8 text-center bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl space-y-3 shadow-xs">
-                  <Inbox className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
-                  <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">No complaints registered yet</div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
-                    Facing hostel water leaks, mess food issues, or transport troubles? Click the Student Complaint button above to file a ticket.
-                  </p>
+                <div className="p-8 text-center bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl space-y-4 shadow-xs">
+                  <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+                    <Inbox className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">No complaints registered yet</div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-1">
+                      Facing hostel water leaks, Wi-Fi outages, or mess issues? Click below to lodge a complaint with automated AI classification.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!currentUser) {
+                        setIsAuthModalOpen(true);
+                      } else {
+                        setActiveView('new_complaint');
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>Lodge First Grievance</span>
+                  </button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

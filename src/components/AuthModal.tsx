@@ -12,7 +12,6 @@ import {
   AlertCircle,
   ArrowRight,
   Sparkles,
-  Info,
   X
 } from 'lucide-react';
 import { UserProfile, StudentType } from '../types';
@@ -319,13 +318,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
           {/* TAB 1: STUDENT LOGIN */}
           {activeTab === 'login' && (
             <form onSubmit={handleStudentLogin} className="space-y-4">
-              <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/60 rounded-xl text-xs text-blue-900 dark:text-blue-300">
-                <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <span>
-                  Demo Student: <strong className="font-mono">2023CS042</strong> / Password: <strong className="font-mono">student123</strong>
-                </span>
-              </div>
-
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   College Register Number *

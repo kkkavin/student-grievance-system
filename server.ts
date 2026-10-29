@@ -128,40 +128,57 @@ function sendSimulatedEmail(to: string, subject: string, body: string, type: 'ot
 }
 
 // Category suggestion heuristic
-function detectSuggestedCategory(text: string, currentCategory?: string): string {
+function detectSuggestedCategory(text: string, currentCategory?: string, studentType?: string): string {
   const lower = text.toLowerCase();
+  const isHosteller = studentType === 'hosteller';
+
   if (lower.includes('ragging') || lower.includes('harass') || lower.includes('threat') || lower.includes('bully')) {
     return 'Ragging & Harassment';
   }
   if (lower.includes('water') || lower.includes('leak') || lower.includes('pipe') || lower.includes('tap') || lower.includes('toilet') || lower.includes('flush') || lower.includes('drain') || lower.includes('sink')) {
     return 'Plumbing & Water';
   }
-  if (lower.includes('wifi') || lower.includes('wi-fi') || lower.includes('internet') || lower.includes('router') || lower.includes('network') || lower.includes('speed')) {
-    return 'Hostel Wi-Fi';
-  }
-  if (lower.includes('food') || lower.includes('mess') || lower.includes('canteen') || lower.includes('meal') || lower.includes('dinner') || lower.includes('lunch') || lower.includes('breakfast') || lower.includes('taste')) {
-    return 'Food';
+  if (lower.includes('wifi') || lower.includes('wi-fi') || lower.includes('internet') || lower.includes('router') || lower.includes('network') || lower.includes('speed') || lower.includes('lan')) {
+    return isHosteller ? 'Hostel Wi-Fi & Internet' : 'Library & Wi-Fi';
   }
   if (lower.includes('bus') || lower.includes('transport') || lower.includes('driver') || lower.includes('route') || lower.includes('late')) {
     return 'Bus & Transport';
   }
-  if (lower.includes('fan') || lower.includes('ac') || lower.includes('light') || lower.includes('power') || lower.includes('electric') || lower.includes('spark') || lower.includes('switch')) {
+  if (lower.includes('canteen') || lower.includes('cafeteria')) {
+    return isHosteller ? 'Food & Mess' : 'Canteen & Cafeteria';
+  }
+  if (lower.includes('food') || lower.includes('mess') || lower.includes('meal') || lower.includes('dinner') || lower.includes('lunch') || lower.includes('breakfast') || lower.includes('taste')) {
+    return isHosteller ? 'Food & Mess' : 'Canteen & Cafeteria';
+  }
+  if (lower.includes('fan') || lower.includes('ac') || lower.includes('light') || lower.includes('power') || lower.includes('electric') || lower.includes('spark') || lower.includes('switch') || lower.includes('socket')) {
     return 'Electrical & AC';
   }
-  if (lower.includes('lab') || lower.includes('class') || lower.includes('classroom') || lower.includes('projector') || lower.includes('bench') || lower.includes('desk') || lower.includes('computer')) {
-    return 'Classroom & Lab';
+  if (lower.includes('lab') || lower.includes('class') || lower.includes('classroom') || lower.includes('projector') || lower.includes('bench') || lower.includes('desk') || lower.includes('computer') || lower.includes('pc')) {
+    return 'Classroom & Lab Facilities';
   }
-  if (lower.includes('door') || lower.includes('window') || lower.includes('lock') || lower.includes('bed') || lower.includes('cupboard') || lower.includes('repair') || lower.includes('broken')) {
+  if (lower.includes('clean') || lower.includes('dirty') || lower.includes('dust') || lower.includes('garbage') || lower.includes('trash') || lower.includes('waste') || lower.includes('smell') || lower.includes('hygiene')) {
+    return isHosteller ? 'Cleanliness & Sanitation' : 'Campus Cleanliness';
+  }
+  if (lower.includes('door') || lower.includes('window') || lower.includes('lock') || lower.includes('bed') || lower.includes('cupboard') || lower.includes('repair') || lower.includes('broken') || lower.includes('damage')) {
     return 'Damages & Repairs';
   }
-  return currentCategory || 'Others';
+  if (lower.includes('fee') || lower.includes('fees') || lower.includes('exam') || lower.includes('certificate') || lower.includes('scholarship') || lower.includes('admin') || lower.includes('office') || lower.includes('hall ticket')) {
+    return 'Administrative & Fees';
+  }
+  if (lower.includes('book') || lower.includes('library') || lower.includes('journal')) {
+    return 'Library & Wi-Fi';
+  }
+  if (currentCategory && currentCategory !== 'Others') {
+    return currentCategory;
+  }
+  return isHosteller ? 'Hostel Maintenance' : 'Campus Facilities';
 }
 
 // Spam & Gibberish Detection (runs locally without any external API or keys)
-function analyzeSpamAndGibberish(text: string, category?: string): { isSpam: boolean; reason: string; confidence: number; suggestedCategory: string } {
+function analyzeSpamAndGibberish(text: string, category?: string, studentType?: string): { isSpam: boolean; reason: string; confidence: number; suggestedCategory: string } {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
-  const suggestedCategory = detectSuggestedCategory(trimmed, category);
+  const suggestedCategory = detectSuggestedCategory(trimmed, category, studentType);
 
   // 1. Min length requirement
   if (trimmed.length < 8) {
@@ -306,7 +323,11 @@ app.get('/api/grievances', (req: Request, res: Response) => {
 
 app.post('/api/grievances', (req: Request, res: Response) => {
   try {
-    const newGrievance = createGrievance(req.body);
+    const payload = { ...req.body };
+    if (!payload.category || payload.category === 'Others' || payload.category.trim() === '') {
+      payload.category = detectSuggestedCategory(payload.description || '', payload.category, payload.studentType);
+    }
+    const newGrievance = createGrievance(payload);
     res.status(201).json(newGrievance);
   } catch (err: any) {
     console.error('Error creating grievance:', err);
@@ -466,7 +487,7 @@ app.post('/api/ai/classify-complaint', async (req: Request, res: Response) => {
   const trimmed = text.trim();
 
   // 1. Run local deterministic heuristic first (immediate, 100% offline)
-  const heuristicResult = analyzeSpamAndGibberish(trimmed, category);
+  const heuristicResult = analyzeSpamAndGibberish(trimmed, category, studentType);
 
   // If flagged as spam by heuristic or if no AI key configured, return immediately
   const ai = getAI();
