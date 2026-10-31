@@ -17,6 +17,7 @@ import {
   getOutboxEmails,
   getDatabase,
 } from './db.ts';
+import { defaultClassifier } from './src/ml/complaintClassifier.ts';
 
 dotenv.config();
 
@@ -127,176 +128,18 @@ function sendSimulatedEmail(to: string, subject: string, body: string, type: 'ot
   return emailItem;
 }
 
-// Category suggestion heuristic
+// Category suggestion powered by Local ML Model (TF-IDF + Multinomial Naive Bayes)
 function detectSuggestedCategory(text: string, currentCategory?: string, studentType?: string): string {
-  const lower = text.toLowerCase();
-  const isHosteller = studentType === 'hosteller';
-
-  if (lower.includes('ragging') || lower.includes('harass') || lower.includes('threat') || lower.includes('bully')) {
-    return 'Ragging & Harassment';
-  }
-  if (lower.includes('water') || lower.includes('leak') || lower.includes('pipe') || lower.includes('tap') || lower.includes('toilet') || lower.includes('flush') || lower.includes('drain') || lower.includes('sink')) {
-    return 'Plumbing & Water';
-  }
-  if (lower.includes('wifi') || lower.includes('wi-fi') || lower.includes('internet') || lower.includes('router') || lower.includes('network') || lower.includes('speed') || lower.includes('lan')) {
-    return isHosteller ? 'Hostel Wi-Fi & Internet' : 'Library & Wi-Fi';
-  }
-  if (lower.includes('bus') || lower.includes('transport') || lower.includes('driver') || lower.includes('route') || lower.includes('late')) {
-    return 'Bus & Transport';
-  }
-  if (lower.includes('canteen') || lower.includes('cafeteria')) {
-    return isHosteller ? 'Food & Mess' : 'Canteen & Cafeteria';
-  }
-  if (lower.includes('food') || lower.includes('mess') || lower.includes('meal') || lower.includes('dinner') || lower.includes('lunch') || lower.includes('breakfast') || lower.includes('taste')) {
-    return isHosteller ? 'Food & Mess' : 'Canteen & Cafeteria';
-  }
-  if (lower.includes('fan') || lower.includes('ac') || lower.includes('light') || lower.includes('power') || lower.includes('electric') || lower.includes('spark') || lower.includes('switch') || lower.includes('socket')) {
-    return 'Electrical & AC';
-  }
-  if (lower.includes('lab') || lower.includes('class') || lower.includes('classroom') || lower.includes('projector') || lower.includes('bench') || lower.includes('desk') || lower.includes('computer') || lower.includes('pc')) {
-    return 'Classroom & Lab Facilities';
-  }
-  if (lower.includes('clean') || lower.includes('dirty') || lower.includes('dust') || lower.includes('garbage') || lower.includes('trash') || lower.includes('waste') || lower.includes('smell') || lower.includes('hygiene')) {
-    return isHosteller ? 'Cleanliness & Sanitation' : 'Campus Cleanliness';
-  }
-  if (lower.includes('door') || lower.includes('window') || lower.includes('lock') || lower.includes('bed') || lower.includes('cupboard') || lower.includes('repair') || lower.includes('broken') || lower.includes('damage')) {
-    return 'Damages & Repairs';
-  }
-  if (lower.includes('fee') || lower.includes('fees') || lower.includes('exam') || lower.includes('certificate') || lower.includes('scholarship') || lower.includes('admin') || lower.includes('office') || lower.includes('hall ticket')) {
-    return 'Administrative & Fees';
-  }
-  if (lower.includes('book') || lower.includes('library') || lower.includes('journal')) {
-    return 'Library & Wi-Fi';
-  }
-  if (currentCategory && currentCategory !== 'Others') {
+  if (currentCategory && currentCategory !== 'Others' && currentCategory.trim() !== '') {
     return currentCategory;
   }
-  return isHosteller ? 'Hostel Maintenance' : 'Campus Facilities';
+  const mlResult = defaultClassifier.predict(text, studentType);
+  return mlResult.category;
 }
 
-// Spam & Gibberish Detection (runs locally without any external API or keys)
-function analyzeSpamAndGibberish(text: string, category?: string, studentType?: string): { isSpam: boolean; reason: string; confidence: number; suggestedCategory: string } {
-  const trimmed = text.trim();
-  const lower = trimmed.toLowerCase();
-  const suggestedCategory = detectSuggestedCategory(trimmed, category, studentType);
-
-  // 1. Min length requirement
-  if (trimmed.length < 8) {
-    return {
-      isSpam: true,
-      reason: 'Complaint description is too short (minimum 8 characters required)',
-      confidence: 0.98,
-      suggestedCategory,
-    };
-  }
-
-  const words = trimmed.split(/\s+/).filter(Boolean);
-  const grievanceKeywords = [
-    'water', 'wifi', 'wi-fi', 'internet', 'food', 'mess', 'room', 'hostel', 'canteen', 'bus', 'transport',
-    'fan', 'ac', 'air', 'light', 'plumbing', 'tap', 'leak', 'toilet', 'bathroom', 'clean', 'dirty', 'ragging',
-    'harass', 'teacher', 'prof', 'faculty', 'lab', 'computer', 'class', 'classroom', 'bench', 'chair', 'desk',
-    'door', 'lock', 'window', 'power', 'electricity', 'outage', 'sound', 'noise', 'stolen', 'lost', 'bed',
-    'mattress', 'drain', 'overflow', 'broken', 'damaged', 'repair', 'fix', 'not working', 'issue', 'complaint',
-    'problem', 'slow', 'poor', 'bad', 'quality', 'fee', 'exam', 'result', 'attendance', 'permission', 'leave', 'help'
-  ];
-
-  const hasGrievanceKeyword = grievanceKeywords.some(kw => lower.includes(kw));
-
-  // 2. Test messages / meaningless single terms
-  const dummyTerms = ['test', 'testing', 'hello', 'hi', 'demo', 'sample', 'asdf', 'qwerty', 'abc', 'xyz', 'no', 'nothing', 'spam', 'dummy'];
-  if (words.length <= 2 && dummyTerms.includes(lower.replace(/[^a-z]/g, ''))) {
-    return {
-      isSpam: true,
-      reason: 'Test or placeholder text detected',
-      confidence: 0.95,
-      suggestedCategory,
-    };
-  }
-
-  // 3. Sentence length vs grievance keywords
-  if (words.length < 3 && !hasGrievanceKeyword) {
-    return {
-      isSpam: true,
-      reason: 'Description is too brief or lacks actionable grievance details',
-      confidence: 0.9,
-      suggestedCategory,
-    };
-  }
-
-  // 4. Repeated character sequence (e.g. "aaaaaa", "xxxxxx", "ffffff", "111111", "!!!!!!")
-  if (/(.)\1{4,}/i.test(trimmed)) {
-    return {
-      isSpam: true,
-      reason: 'Excessive repetitive character pattern detected',
-      confidence: 0.98,
-      suggestedCategory,
-    };
-  }
-
-  // 5. Repeated word loops (e.g. "test test test", "bad bad bad bad", "qwerty qwerty")
-  if (words.length >= 3) {
-    const uniqueWords = new Set(words.map(w => w.toLowerCase().replace(/[^a-z0-9]/g, '')));
-    if (uniqueWords.size === 1) {
-      return {
-        isSpam: true,
-        reason: 'Repetitive single word loop detected',
-        confidence: 0.98,
-        suggestedCategory,
-      };
-    }
-    if (words.length >= 4 && uniqueWords.size <= 2 && !hasGrievanceKeyword) {
-      return {
-        isSpam: true,
-        reason: 'Repetitive phrase without complaint context detected',
-        confidence: 0.95,
-        suggestedCategory,
-      };
-    }
-  }
-
-  // 6. Keyboard smash / row patterns
-  const keyboardSmashes = [
-    'qwerty', 'asdfgh', 'zxcvbn', 'qwert', 'asdfg', 'zxcvb',
-    '12345', '23456', '34567', '45678', '56789',
-    'poiuy', 'lkjhg', 'mnbvc', 'dfghj', 'fghjk',
-    'qweqwe', 'asdasd', 'zxczxc', 'asdfasdf', 'qwertyuiop',
-    'asdfghjkl', 'zxcvbnm', 'lkjhasdf', 'cbhhcbhbdhcdbhd'
-  ];
-  for (const smash of keyboardSmashes) {
-    if (lower.includes(smash) && !hasGrievanceKeyword) {
-      return {
-        isSpam: true,
-        reason: 'Keyboard smash or row pattern detected',
-        confidence: 0.98,
-        suggestedCategory,
-      };
-    }
-  }
-
-  // 7. Consonant clusters / missing vowels in long words
-  for (const word of words) {
-    const cleanWord = word.toLowerCase().replace(/[^a-z]/g, '');
-    if (cleanWord.length >= 6) {
-      if (/[bcdfghjklmnpqrstvwxyz]{5,}/i.test(cleanWord) && !hasGrievanceKeyword) {
-        return {
-          isSpam: true,
-          reason: 'Unnatural consonant cluster (gibberish string) detected',
-          confidence: 0.95,
-          suggestedCategory,
-        };
-      }
-      if (!/[aeiouy]/i.test(cleanWord)) {
-        return {
-          isSpam: true,
-          reason: 'Word with missing vowels (gibberish string) detected',
-          confidence: 0.95,
-          suggestedCategory,
-        };
-      }
-    }
-  }
-
-  return { isSpam: false, reason: 'Legitimate student grievance pattern', confidence: 0.95, suggestedCategory };
+// Spam & Gibberish Detection powered by Local ML Model (runs 100% locally with zero external API)
+function analyzeSpamAndGibberish(text: string, category?: string, studentType?: string) {
+  return defaultClassifier.analyzeSpam(text, category, studentType);
 }
 
 // ---------------------- REST API ROUTES (SQLITE3) ----------------------
@@ -477,7 +320,7 @@ app.post('/api/auth/verify-otp', (req: Request, res: Response) => {
   res.json({ success: true, message: 'OTP verified successfully' });
 });
 
-// 7. AI Spam & Gibberish Classification Endpoint (No API key required!)
+// 7. AI Local ML Classification Endpoint (Runs 100% locally with zero external API key)
 app.post('/api/ai/classify-complaint', async (req: Request, res: Response) => {
   const { text, category, studentType } = req.body;
   if (!text || typeof text !== 'string') {
@@ -486,70 +329,26 @@ app.post('/api/ai/classify-complaint', async (req: Request, res: Response) => {
 
   const trimmed = text.trim();
 
-  // 1. Run local deterministic heuristic first (immediate, 100% offline)
-  const heuristicResult = analyzeSpamAndGibberish(trimmed, category, studentType);
-
-  // If flagged as spam by heuristic or if no AI key configured, return immediately
-  const ai = getAI();
-  if (heuristicResult.isSpam || !ai) {
-    return res.json({
-      isSpam: heuristicResult.isSpam,
-      reason: heuristicResult.reason,
-      confidence: heuristicResult.confidence,
-      suggestedCategory: heuristicResult.suggestedCategory,
-    });
-  }
-
-  // 2. Optional Gemini AI classification if API key is explicitly configured
-  try {
-    const prompt = `You are an AI Spam & Authenticity Classifier for a College Student Grievance Redressal System.
-
-Evaluate the following student complaint text:
-"""
-${trimmed}
-"""
-
-Category Selected: ${category || 'General'}
-Student Type: ${studentType || 'Unknown'}
-
-Rules:
-1. Mark "isSpam": true if the text is gibberish, test text, or trolling.
-2. Mark "isSpam": false if it describes a genuine college or hostel grievance.
-
-Respond ONLY with valid JSON:
-{
-  "isSpam": boolean,
-  "reason": "concise explanation under 12 words",
-  "confidence": number between 0.0 and 1.0,
-  "suggestedCategory": "Food" | "Damages & Repairs" | "Hostel Wi-Fi" | "Plumbing & Water" | "Electrical & AC" | "Ragging & Harassment" | "Bus & Transport" | "Canteen" | "Classroom & Lab" | "Others"
-}`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const responseText = response.text || '{}';
-    const parsed = JSON.parse(responseText);
-    return res.json({
-      isSpam: Boolean(parsed.isSpam),
-      reason: parsed.reason || (parsed.isSpam ? 'Flagged as spam by AI model' : 'Legitimate student complaint'),
-      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.95,
-      suggestedCategory: parsed.suggestedCategory || heuristicResult.suggestedCategory,
-    });
-  } catch (err: any) {
-    // If Gemini fails or key invalid, seamlessly fall back to local heuristic
-  }
+  // Run local ML Model (Multinomial Naive Bayes + TF-IDF Vector Space Classifier)
+  const spamAnalysis = defaultClassifier.analyzeSpam(trimmed, category, studentType);
+  const mlPrediction = defaultClassifier.predict(trimmed, studentType);
 
   res.json({
-    isSpam: heuristicResult.isSpam,
-    reason: heuristicResult.reason,
-    confidence: heuristicResult.confidence,
-    suggestedCategory: heuristicResult.suggestedCategory,
+    isSpam: spamAnalysis.isSpam,
+    reason: spamAnalysis.reason,
+    confidence: spamAnalysis.isSpam ? spamAnalysis.confidence : mlPrediction.confidence,
+    suggestedCategory: spamAnalysis.isSpam ? (category || 'Others') : mlPrediction.category,
+    suggestedIcon: mlPrediction.icon,
+    isUrgent: mlPrediction.isUrgent,
+    topFeatures: mlPrediction.topFeatures,
+    probabilities: mlPrediction.probabilities,
+    model: mlPrediction.model,
   });
+});
+
+// 7b. ML Model Metadata & Diagnostics Endpoint
+app.get('/api/ai/ml-model-info', (req: Request, res: Response) => {
+  res.json(defaultClassifier.getMetadata());
 });
 
 // 8. Trigger Automated Email Notifications (Grievance Confirmation & Resolution Done)

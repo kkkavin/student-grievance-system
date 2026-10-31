@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, Grievance, PriorityLevel } from '../types';
 import { createGrievanceApi } from '../api';
+import { defaultClassifier, ClassificationResult } from '../ml/complaintClassifier';
 
 interface StudentComplaintFormProps {
   user: UserProfile;
@@ -42,54 +43,10 @@ interface StudentComplaintFormProps {
 }
 
 // ---------------------------------------------------------------------------
-// Real-time AI Category & Urgency Classifier
+// Real-time Local ML Model Category & Urgency Classifier
 // ---------------------------------------------------------------------------
-function detectRealTimeCategory(text: string, studentType?: string): { category: string; icon: string; isUrgent: boolean } {
-  const lower = text.toLowerCase();
-  const isHosteller = studentType === 'hosteller';
-
-  if (lower.includes('ragging') || lower.includes('harass') || lower.includes('threat') || lower.includes('bully')) {
-    return { category: 'Ragging & Harassment', icon: '🛡️', isUrgent: true };
-  }
-  if (lower.includes('water') || lower.includes('leak') || lower.includes('pipe') || lower.includes('tap') || lower.includes('toilet') || lower.includes('flush') || lower.includes('drain') || lower.includes('sink')) {
-    return { category: 'Plumbing & Water', icon: '💧', isUrgent: lower.includes('overflow') || lower.includes('urgent') };
-  }
-  if (lower.includes('wifi') || lower.includes('wi-fi') || lower.includes('internet') || lower.includes('router') || lower.includes('network') || lower.includes('speed') || lower.includes('lan')) {
-    return { category: isHosteller ? 'Hostel Wi-Fi & Internet' : 'Library & Wi-Fi', icon: '📶', isUrgent: false };
-  }
-  if (lower.includes('bus') || lower.includes('transport') || lower.includes('driver') || lower.includes('route') || lower.includes('late')) {
-    return { category: 'Bus & Transport', icon: '🚌', isUrgent: false };
-  }
-  if (lower.includes('canteen') || lower.includes('cafeteria')) {
-    return { category: isHosteller ? 'Food & Mess' : 'Canteen & Cafeteria', icon: '🍱', isUrgent: false };
-  }
-  if (lower.includes('food') || lower.includes('mess') || lower.includes('meal') || lower.includes('dinner') || lower.includes('lunch') || lower.includes('breakfast') || lower.includes('taste')) {
-    return { category: isHosteller ? 'Food & Mess' : 'Canteen & Cafeteria', icon: '🍱', isUrgent: false };
-  }
-  if (lower.includes('fan') || lower.includes('ac') || lower.includes('light') || lower.includes('power') || lower.includes('electric') || lower.includes('spark') || lower.includes('switch') || lower.includes('socket')) {
-    return { category: 'Electrical & AC', icon: '⚡', isUrgent: lower.includes('spark') || lower.includes('shock') };
-  }
-  if (lower.includes('lab') || lower.includes('class') || lower.includes('classroom') || lower.includes('projector') || lower.includes('bench') || lower.includes('desk') || lower.includes('computer') || lower.includes('pc')) {
-    return { category: 'Classroom & Lab Facilities', icon: '🔬', isUrgent: false };
-  }
-  if (lower.includes('clean') || lower.includes('dirty') || lower.includes('dust') || lower.includes('garbage') || lower.includes('trash') || lower.includes('waste') || lower.includes('smell') || lower.includes('hygiene')) {
-    return { category: isHosteller ? 'Cleanliness & Sanitation' : 'Campus Cleanliness', icon: '🧹', isUrgent: false };
-  }
-  if (lower.includes('door') || lower.includes('window') || lower.includes('lock') || lower.includes('bed') || lower.includes('cupboard') || lower.includes('repair') || lower.includes('broken') || lower.includes('damage')) {
-    return { category: 'Damages & Repairs', icon: '🛠️', isUrgent: false };
-  }
-  if (lower.includes('fee') || lower.includes('fees') || lower.includes('exam') || lower.includes('certificate') || lower.includes('scholarship') || lower.includes('admin') || lower.includes('office') || lower.includes('hall ticket')) {
-    return { category: 'Administrative & Fees', icon: '📄', isUrgent: false };
-  }
-  if (lower.includes('book') || lower.includes('library') || lower.includes('journal')) {
-    return { category: 'Library & Wi-Fi', icon: '📚', isUrgent: false };
-  }
-
-  return {
-    category: isHosteller ? 'Hostel Maintenance' : 'Campus Facilities',
-    icon: '🏛️',
-    isUrgent: false,
-  };
+function detectRealTimeCategory(text: string, studentType?: string): ClassificationResult {
+  return defaultClassifier.predict(text, studentType);
 }
 
 // ---------------------------------------------------------------------------
@@ -461,15 +418,17 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
     }
 
     setSubmitting(true);
-    setSubmitStep('1/3 Analyzing authenticity with AI triage...');
+    setSubmitStep('1/3 Running Local ML Model classification...');
 
     try {
-      // 1. Send to AI Classifier endpoint (works 100% locally with zero external API key)
+      // 1. Send to Local ML Classifier endpoint (works 100% locally with zero external API key)
       let aiResult = {
         isSpam: false,
         reason: 'Legitimate student grievance',
-        confidence: 0.95,
+        confidence: aiRealtime.confidence || 0.95,
         suggestedCategory: aiRealtime.category,
+        model: aiRealtime.model,
+        topFeatures: aiRealtime.topFeatures,
       };
 
       try {
@@ -694,15 +653,15 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
 
       {/* 2. Hero Title Section */}
       <div className="space-y-1.5">
-        <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-200/60 dark:border-blue-900 text-blue-700 dark:text-blue-300 text-xs font-semibold">
+        <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/60 dark:to-indigo-950/60 border border-blue-200/60 dark:border-blue-900 text-blue-700 dark:text-blue-300 text-xs font-semibold">
           <Sparkles className="w-3.5 h-3.5 text-blue-500 animate-spin-slow" />
-          <span>Intelligent Auto-Triage Active</span>
+          <span>Local ML Auto-Triage Active (100% Offline)</span>
         </div>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
           Describe Your Grievance
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-xl leading-relaxed">
-          Simply type what happened below. The AI automatically classifies the department, sets priority, and alerts the college redressal team. No category selection required.
+          Simply type what happened below. A small local ML model automatically classifies the department, sets priority, and alerts the college redressal team. No category selection required.
         </p>
       </div>
 
@@ -967,19 +926,36 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
               
               {/* Left Group: AI Auto-Detected Category Pill & Voice Mic */}
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Auto-detected category badge */}
-                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800/80 border border-blue-200/80 dark:border-slate-700 text-xs font-semibold text-blue-700 dark:text-blue-300 shadow-2xs">
+                {/* Auto-detected category badge powered by Local ML Model */}
+                <div
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800/80 border border-blue-200/80 dark:border-slate-700 text-xs font-semibold text-blue-700 dark:text-blue-300 shadow-2xs"
+                  title={`Local ML Classification: ${aiRealtime.category} (${Math.round(aiRealtime.confidence * 100)}% confidence score)`}
+                >
                   <span>{aiRealtime.icon}</span>
                   <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
-                    Auto-Category:
+                    ML Category:
                   </span>
                   <span className="font-bold">{aiRealtime.category}</span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 text-[10px] font-mono font-bold">
+                    {Math.round(aiRealtime.confidence * 100)}%
+                  </span>
                   {aiRealtime.isUrgent && (
                     <span className="px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-950 text-red-600 dark:text-red-300 text-[10px] font-extrabold uppercase tracking-wide">
                       Urgent
                     </span>
                   )}
                 </div>
+
+                {/* ML Key Features Token Micro-Pill */}
+                {aiRealtime.topFeatures.length > 0 && description.trim().length > 10 && (
+                  <div className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-medium bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 text-slate-600 dark:text-slate-400">
+                    <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />
+                    <span className="text-slate-400 text-[10px]">ML Tokens:</span>
+                    <span className="font-mono text-[10px] text-indigo-600 dark:text-indigo-400">
+                      {aiRealtime.topFeatures.join(', ')}
+                    </span>
+                  </div>
+                )}
 
                 {/* Clarity indicator */}
                 <div
