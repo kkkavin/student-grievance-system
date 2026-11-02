@@ -7,7 +7,6 @@ import {
   Mail,
   Phone,
   Building,
-  KeyRound,
   CheckCircle2,
   AlertCircle,
   ArrowRight,
@@ -16,8 +15,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, StudentType } from '../types';
 import { HOSTEL_BLOCKS, DEPARTMENT_OPTIONS } from '../data/constants';
-import { loginUserApi, saveUserApi } from '../api';
-import { sendOTPEmail, verifyOTPEmail } from '../services/sendEmailOTP';
+import { loginUserApi, registerUserApi } from '../api';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -49,27 +47,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
   const [hostelBlock, setHostelBlock] = useState(HOSTEL_BLOCKS[0]);
   const [roomNo, setRoomNo] = useState('');
 
-  // OTP Verification state
-  const [step, setStep] = useState<'form' | 'otp'>('form');
-  const [enteredOtp, setEnteredOtp] = useState('');
-  const [otpSentMessage, setOtpSentMessage] = useState('');
-  const [localOtpCode, setLocalOtpCode] = useState('');
-  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  // Signup state
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-
-  // 30-second cooldown timer for Resend OTP
-  React.useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (cooldownSeconds > 0) {
-      timer = setInterval(() => {
-        setCooldownSeconds((prev) => prev - 1);
-      }, 1000);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [cooldownSeconds]);
 
   if (!isOpen) return null;
 
@@ -107,19 +87,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
     }
   };
 
-  // Step 1 of Signup: Validate & Send OTP to student email
-  const handleInitiateSignup = async (e: React.FormEvent) => {
+  // Handle direct student registration for real users
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
-    if (!signupRegNo.trim() || !name.trim() || !phone.trim() || !email.trim() || !password.trim()) {
+    const cleanRegNo = signupRegNo.trim().toUpperCase();
+    const cleanName = name.trim();
+    const cleanPhone = phone.trim();
+    const cleanEmail = email.trim();
+    const cleanPassword = password.trim();
+
+    if (!cleanRegNo || !cleanName || !cleanPhone || !cleanEmail || !cleanPassword) {
       setErrorMsg('Please fill in all mandatory fields.');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) {
+    if (!emailRegex.test(cleanEmail)) {
       setErrorMsg('Please enter a valid email address (e.g. student@college.edu).');
+      return;
+    }
+
+    if (cleanPassword.length < 6) {
+      setErrorMsg('Password must be at least 6 characters long.');
       return;
     }
 
@@ -130,107 +121,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
 
     setLoading(true);
     try {
-      const result = await sendOTPEmail({
-        email: email.trim(),
-        name: name.trim(),
-        regNo: signupRegNo.trim().toUpperCase()
-      });
-
-      if (result.success) {
-        setEnteredOtp('');
-        if (result.otpCode) {
-          setLocalOtpCode(result.otpCode);
-        }
-        setStep('otp');
-        setCooldownSeconds(30);
-        setOtpSentMessage(`Verification code dispatched to ${email.trim()}.`);
-      } else {
-        setErrorMsg(result.message || 'Failed to dispatch verification OTP to your email.');
-      }
-    } catch (err: any) {
-      console.error('OTP request error:', err);
-      setErrorMsg(err?.message || 'Error generating OTP. Please check your connection.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle Resend OTP with 30-second cooldown check
-  const handleResendOtp = async () => {
-    if (cooldownSeconds > 0 || loading) return;
-    setErrorMsg('');
-    setLoading(true);
-    try {
-      const result = await sendOTPEmail({
-        email: email.trim(),
-        name: name.trim(),
-        regNo: signupRegNo.trim().toUpperCase()
-      });
-
-      if (result.success) {
-        setEnteredOtp('');
-        if (result.otpCode) {
-          setLocalOtpCode(result.otpCode);
-        }
-        setCooldownSeconds(30);
-        setOtpSentMessage(`Resent verification code to ${email.trim()}.`);
-      } else {
-        setErrorMsg(result.message || 'Failed to resend verification OTP.');
-      }
-    } catch (err: any) {
-      setErrorMsg('Failed to resend verification OTP.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Step 2 of Signup: Verify OTP and create profile
-  const handleVerifyOtpAndRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-
-    if (!enteredOtp.trim()) {
-      setErrorMsg('Please enter the 6-digit OTP code.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      // 1. Verify OTP with service/backend
-      const verifyResult = await verifyOTPEmail(email.trim(), enteredOtp.trim());
-
-      if (!verifyResult.success) {
-        setErrorMsg(verifyResult.message || 'Invalid or expired OTP code.');
-        setLoading(false);
-        return;
-      }
-
-      // 2. Build User Profile
-      const newUser: UserProfile = {
-        id: signupRegNo.trim().toUpperCase(),
-        regNo: signupRegNo.trim().toUpperCase(),
-        name: name.trim(),
+      const user = await registerUserApi({
+        regNo: cleanRegNo,
+        name: cleanName,
         department,
         gender,
         studentType,
-        phone: phone.trim(),
-        email: email.trim(),
+        phone: cleanPhone,
+        email: cleanEmail,
         hostelBlock: studentType === 'hosteller' ? hostelBlock : undefined,
         roomNo: studentType === 'hosteller' ? roomNo.trim() : undefined,
         role: 'student',
-        isEmailVerified: true,
-        createdAt: new Date().toISOString()
-      };
-
-      // 3. Save via API
-      const savedUser = await saveUserApi({
-        ...newUser,
-        password,
+        password: cleanPassword,
       });
 
-      onSuccess(savedUser);
+      onSuccess(user);
     } catch (err: any) {
-      setErrorMsg('Registration failed: ' + (err?.message || 'Unknown error'));
+      console.error('Signup error:', err);
+      setErrorMsg(err?.message || 'Registration failed. Please verify your details.');
     } finally {
       setLoading(false);
     }
@@ -286,7 +194,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
               onClick={() => {
                 setActiveTab('signup');
                 setErrorMsg('');
-                setStep('form');
               }}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                 activeTab === 'signup'
@@ -441,9 +348,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
           {/* TAB 3: STUDENT SIGNUP */}
           {activeTab === 'signup' && (
             <div>
-              {step === 'form' ? (
-                /* STEP 1: SIGNUP FORM */
-                <form onSubmit={handleInitiateSignup} className="space-y-3">
+              <form onSubmit={handleSignup} className="space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -633,97 +538,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
                   )}
 
                   <button
-                    id="submit-send-otp-btn"
+                    id="submit-signup-btn"
                     type="submit"
                     disabled={loading}
-                    className="w-full mt-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                    className="w-full mt-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 shadow-xs"
                   >
-                    {loading ? 'Generating Verification OTP...' : 'Proceed to Verification'}
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    {loading ? 'Creating Student Account...' : 'Complete Registration'}
+                    <CheckCircle2 className="w-4 h-4" />
                   </button>
                 </form>
-              ) : (
-                /* STEP 2: OTP ENTRY */
-                <form onSubmit={handleVerifyOtpAndRegister} className="space-y-4">
-                  <div className="text-center p-4 bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl">
-                    <KeyRound className="w-8 h-8 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Email Verification</h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">{otpSentMessage}</p>
-
-                    {/* Local Mode One-Click OTP Helper */}
-                    {localOtpCode && (
-                      <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/60 border border-blue-300 dark:border-blue-700 rounded-lg text-xs font-mono text-blue-900 dark:text-blue-200">
-                        <span>Local OTP:</span>
-                        <span className="font-bold tracking-widest text-sm">{localOtpCode}</span>
-                        <button
-                          type="button"
-                          onClick={() => setEnteredOtp(localOtpCode)}
-                          className="ml-1 px-1.5 py-0.5 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700 cursor-pointer"
-                        >
-                          Auto-fill
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 text-center">
-                      Enter the 6-Digit OTP Code
-                    </label>
-                    <input
-                      id="signup-otp-input"
-                      type="text"
-                      maxLength={6}
-                      required
-                      autoFocus
-                      placeholder="• • • • • •"
-                      value={enteredOtp}
-                      onChange={(e) => setEnteredOtp(e.target.value)}
-                      className="w-48 mx-auto block text-center tracking-widest text-lg font-mono font-bold py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 dark:text-white rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  {/* Resend OTP Bar with Cooldown Timer */}
-                  <div className="flex items-center justify-between text-xs px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
-                    <span className="text-slate-500 dark:text-slate-400">Didn't receive the code?</span>
-                    <button
-                      id="resend-otp-btn"
-                      type="button"
-                      disabled={cooldownSeconds > 0 || loading}
-                      onClick={handleResendOtp}
-                      className="font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    >
-                      {cooldownSeconds > 0 ? `Resend OTP in ${cooldownSeconds}s` : 'Resend OTP'}
-                    </button>
-                  </div>
-
-                  {errorMsg && (
-                    <div className="p-2.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl text-xs text-red-700 dark:text-red-300 text-center">
-                      {errorMsg}
-                    </div>
-                  )}
-
-                  <div className="flex gap-2">
-                    <button
-                      id="back-to-signup-form-btn"
-                      type="button"
-                      onClick={() => setStep('form')}
-                      className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-xl font-medium cursor-pointer"
-                    >
-                      Back
-                    </button>
-                    <button
-                      id="verify-otp-submit-btn"
-                      type="submit"
-                      disabled={loading}
-                      className="flex-2 py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
-                    >
-                      {loading ? 'Verifying OTP...' : 'Verify OTP & Enter'}
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </form>
-              )}
             </div>
           )}
         </div>

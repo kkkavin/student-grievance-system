@@ -15,7 +15,8 @@ import {
   Inbox,
   Filter,
   Sun,
-  Moon
+  Moon,
+  Layers,
 } from 'lucide-react';
 import { UserProfile, Grievance, PriorityLevel, StudentType } from './types';
 import { INITIAL_GRIEVANCES } from './data/initialData';
@@ -69,14 +70,37 @@ export default function App() {
   }, [isDarkMode]);
 
   // Live complaints list
-  const [grievances, setGrievances] = useState<Grievance[]>(INITIAL_GRIEVANCES);
+  const [grievances, setGrievances] = useState<Grievance[]>(() => {
+    try {
+      const savedUser = localStorage.getItem('grievance_portal_user');
+      return savedUser ? INITIAL_GRIEVANCES : [];
+    } catch {
+      return [];
+    }
+  });
 
-  // Fetch grievances from backend & periodically sync
+  // Fetch grievances from backend with strict role and authentication filtering
   const loadGrievances = async () => {
     try {
-      const list = await fetchGrievances();
-      if (Array.isArray(list) && list.length > 0) {
-        setGrievances(list);
+      if (!currentUser) {
+        setGrievances([]);
+        return;
+      }
+
+      if (currentUser.role === 'admin') {
+        const list = await fetchGrievances();
+        if (Array.isArray(list)) {
+          setGrievances(list);
+        }
+      } else {
+        const list = await fetchGrievances({
+          role: 'student',
+          studentRegNo: currentUser.regNo,
+          studentEmail: currentUser.email,
+        });
+        if (Array.isArray(list)) {
+          setGrievances(list);
+        }
       }
     } catch (err) {
       console.warn('Grievances fetch notice (using current state):', err);
@@ -88,7 +112,7 @@ export default function App() {
     // Poll every 4s for fresh updates from backend
     const interval = setInterval(loadGrievances, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUser]);
 
   // Handle student submitted complaint
   const handleGrievanceSubmitted = (newTicket: Grievance) => {
@@ -487,47 +511,120 @@ export default function App() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {studentGrievances.map((item) => (
-                    <div
-                      key={item.id}
-                      id={`student-ticket-card-${item.id}`}
-                      className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 hover:shadow-md transition-all space-y-3 flex flex-col justify-between"
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
-                            {item.ticketNo}
-                          </span>
-                          <span
-                            className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                              item.status === 'resolved'
-                                ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
-                                : 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300'
-                            }`}
+                  {studentGrievances.map((item) => {
+                    const isMerged =
+                      Boolean(item.masterTicketNo) ||
+                      Boolean(item.masterCaseId) ||
+                      item.status === 'MERGED_AUTOMATIC' ||
+                      item.status === 'MERGED';
+
+                    return (
+                      <div
+                        key={item.id}
+                        id={`student-ticket-card-${item.id}`}
+                        className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 hover:shadow-md transition-all space-y-3.5 flex flex-col justify-between"
+                      >
+                        <div className="space-y-2.5">
+                          {/* Header Row: Ticket No & Status Pill */}
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+                              {item.ticketNo}
+                            </span>
+                            <span
+                              className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${
+                                item.status === 'resolved'
+                                  ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800'
+                                  : item.status === 'in_progress'
+                                  ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800'
+                                  : item.status === 'MERGED_AUTOMATIC' || item.status === 'MERGED'
+                                  ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-200/60 dark:border-purple-800'
+                                  : item.status === 'SUSPECTED_DUPLICATE'
+                                  ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800'
+                                  : 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800'
+                              }`}
+                            >
+                              {item.status === 'resolved'
+                                ? 'Resolved'
+                                : item.status === 'in_progress'
+                                ? 'In Progress'
+                                : item.status === 'MERGED_AUTOMATIC' || item.status === 'MERGED'
+                                ? 'Consolidated'
+                                : item.status === 'SUSPECTED_DUPLICATE'
+                                ? 'Under Review'
+                                : 'Under Review'}
+                            </span>
+                          </div>
+
+                          {/* Dedicated Consolidation Banner (Persists even when resolved) */}
+                          {isMerged && (
+                            <div
+                              id={`student-consolidation-banner-${item.id}`}
+                              className="flex items-center gap-2 p-2.5 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/80 rounded-xl text-xs text-purple-900 dark:text-purple-200"
+                            >
+                              <Layers className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                              <div className="leading-tight">
+                                <span className="font-semibold">Consolidated with Master Case </span>
+                                <span className="font-mono font-bold text-purple-700 dark:text-purple-300">
+                                  #{item.masterTicketNo || item.masterCaseId || 'Incident'}
+                                </span>
+                                <p className="text-[10px] text-purple-600 dark:text-purple-400 mt-0.5">
+                                  Cluster incident — all administrative actions and updates are synchronized.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Category Tag */}
+                          <div className="text-xs font-semibold text-blue-700 dark:text-blue-400">
+                            {item.category}
+                          </div>
+
+                          {/* Student's OWN Complaint Description (Zero other students' data) */}
+                          <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 leading-relaxed">
+                            {item.description}
+                          </p>
+                        </div>
+
+                        {/* Public Master Case Notes Callout */}
+                        {item.publicMasterNotes && (
+                          <div
+                            id={`student-master-notes-${item.id}`}
+                            className="p-3 bg-purple-50/70 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 rounded-xl text-xs text-purple-950 dark:text-purple-200 space-y-1"
                           >
-                            {item.status === 'resolved' ? 'Work Done / Resolved' : 'Under Review'}
-                          </span>
+                            <div className="flex items-center gap-1.5 font-bold text-purple-900 dark:text-purple-300 text-[11px]">
+                              <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                              <span>📢 Public Master Case Update:</span>
+                            </div>
+                            <p className="text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+                              {item.publicMasterNotes}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Admin Action Notes Callout */}
+                        {item.adminNotes && (
+                          <div
+                            id={`student-admin-notes-${item.id}`}
+                            className="p-3 bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-xs text-emerald-950 dark:text-emerald-200 space-y-1"
+                          >
+                            <div className="flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-300 text-[11px]">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              <span>Admin Action Note:</span>
+                            </div>
+                            <p className="text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+                              {item.adminNotes}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Card Footer: Timestamp & Room Details */}
+                        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
+                          <span>Submitted {new Date(item.createdAt).toLocaleDateString()}</span>
+                          {item.roomNo && <span>Room {item.roomNo}</span>}
                         </div>
-
-                        <div className="text-xs font-semibold text-blue-700 dark:text-blue-400">{item.category}</div>
-                        <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 leading-relaxed">
-                          {item.description}
-                        </p>
                       </div>
-
-                      {item.adminNotes && (
-                        <div className="p-2.5 bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/60 rounded-xl text-[11px] text-emerald-900 dark:text-emerald-300">
-                          <span className="font-semibold block mb-0.5">Admin Action Note:</span>
-                          {item.adminNotes}
-                        </div>
-                      )}
-
-                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
-                        <span>Submitted {new Date(item.createdAt).toLocaleDateString()}</span>
-                        {item.roomNo && <span>Room {item.roomNo}</span>}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

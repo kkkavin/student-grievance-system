@@ -18,6 +18,7 @@ graphify-out/cost.json
 
 # Tooling local configs
 .claude/
+.agents/teamwork/
 
 # Project report files
 *.pdf

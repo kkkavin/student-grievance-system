@@ -11,13 +11,25 @@ import {
   createGrievance,
   updateGrievance,
   getUserByRegNo,
+  getUserByEmail,
   upsertUser,
   verifyUserCredentials,
   saveOutboxEmail,
   getOutboxEmails,
   getDatabase,
+  withTransaction,
+  getChildGrievances,
+  getCandidatesForDeduplication,
+  getTriageGrievances,
 } from './db.ts';
 import { defaultClassifier } from './src/ml/complaintClassifier.ts';
+import {
+  generateEmbeddingVector,
+  runTwoStageDeduplication,
+} from './src/ml/deduplication.ts';
+import { getCampusTrendAnalytics } from './src/services/analyticsRollup.ts';
+import { getCampusRiskForecast } from './src/services/riskForecasting.ts';
+import { GrievanceStatus, MatchCandidate } from './src/types.ts';
 
 dotenv.config();
 
@@ -157,10 +169,104 @@ app.get('/api/health', (req: Request, res: Response) => {
 app.get('/api/grievances', (req: Request, res: Response) => {
   try {
     const list = getAllGrievances();
+    const role = (req.query.role || req.headers['x-user-role'] || '').toString().toLowerCase();
+    const studentRegNo = (req.query.studentRegNo || req.query.regNo || req.headers['x-user-regno'] || '').toString().trim();
+    const studentEmail = (req.query.studentEmail || req.query.email || '').toString().trim().toLowerCase();
+
+    // If request is from a student or specifies student identification
+    if (role === 'student' || studentRegNo || studentEmail) {
+      const studentFiltered = list.filter((g) => {
+        const matchesRegNo = studentRegNo && g.studentRegNo.toLowerCase() === studentRegNo.toLowerCase();
+        const matchesEmail = studentEmail && g.studentEmail.toLowerCase() === studentEmail;
+        return matchesRegNo || matchesEmail;
+      });
+
+      // Student privacy sanitization: child ticket reporters view only their own complaint details
+      // and public master status notes, completely shielding other reporters' PII and complaint details.
+      const sanitized = studentFiltered.map((g) => {
+        let publicMasterNotes = g.publicMasterNotes;
+        let masterTicketNo: string | undefined;
+        let masterStatus: string | undefined;
+
+        if (g.masterCaseId) {
+          const master = getGrievanceById(g.masterCaseId);
+          if (master) {
+            publicMasterNotes = master.publicMasterNotes || publicMasterNotes;
+            masterTicketNo = master.ticketNo;
+            masterStatus = master.status;
+          }
+        }
+
+        return {
+          id: g.id,
+          ticketNo: g.ticketNo,
+          studentRegNo: g.studentRegNo,
+          studentName: g.studentName,
+          studentEmail: g.studentEmail,
+          studentPhone: g.studentPhone,
+          studentType: g.studentType,
+          hostelBlock: g.hostelBlock,
+          roomNo: g.roomNo,
+          category: g.category,
+          description: g.description,
+          status: g.status,
+          priority: g.priority,
+          isSpam: g.isSpam,
+          createdAt: g.createdAt,
+          resolvedAt: g.resolvedAt,
+          adminNotes: g.adminNotes,
+          masterCaseId: g.masterCaseId,
+          similarityScore: g.similarityScore,
+          mergedAt: g.mergedAt,
+          publicMasterNotes,
+          masterTicketNo,
+          masterStatus,
+        };
+      });
+
+      return res.json(sanitized);
+    }
+
+    // Default admin / unrestricted view
     res.json(list);
   } catch (err: any) {
     console.error('Error fetching grievances:', err);
     res.status(500).json({ error: 'Failed to fetch grievances' });
+  }
+});
+
+// Triage Queue: returns suspected duplicates paired with candidate master tickets
+app.get('/api/grievances/triage', (req: Request, res: Response) => {
+  try {
+    const suspectedDuplicates = getTriageGrievances();
+    res.json({ suspectedDuplicates });
+  } catch (err: any) {
+    console.error('Error fetching triage queue:', err);
+    res.status(500).json({ error: 'Failed to fetch triage queue' });
+  }
+});
+
+// Analytics: Multidimensional Trend Rollup
+app.get('/api/analytics/trends', (req: Request, res: Response) => {
+  try {
+    const liveGrievances = getAllGrievances();
+    const analytics = getCampusTrendAnalytics(liveGrievances);
+    res.json(analytics);
+  } catch (err: any) {
+    console.error('Error computing trend analytics:', err);
+    res.status(500).json({ error: 'Failed to compute trend analytics' });
+  }
+});
+
+// Analytics: Monthly Risk Forecasting Engine
+app.get('/api/analytics/risk-forecast', (req: Request, res: Response) => {
+  try {
+    const liveGrievances = getAllGrievances();
+    const forecast = getCampusRiskForecast(liveGrievances);
+    res.json(forecast);
+  } catch (err: any) {
+    console.error('Error computing risk forecast:', err);
+    res.status(500).json({ error: 'Failed to compute risk forecast' });
   }
 });
 
@@ -170,7 +276,112 @@ app.post('/api/grievances', (req: Request, res: Response) => {
     if (!payload.category || payload.category === 'Others' || payload.category.trim() === '') {
       payload.category = detectSuggestedCategory(payload.description || '', payload.category, payload.studentType);
     }
-    const newGrievance = createGrievance(payload);
+
+    const newGrievance = withTransaction(() => {
+      // 1. Ingest / infer location tag and timestamp
+      const locationTag =
+        payload.locationTag ||
+        (payload.hostelBlock
+          ? `${payload.hostelBlock}${payload.roomNo ? ' - ' + payload.roomNo : ''}`
+          : payload.studentType === 'dayscholar'
+            ? 'Campus Transport / Dayscholar'
+            : 'Campus Facilities');
+      const sourceTimestamp = payload.sourceTimestamp || new Date().toISOString();
+
+      // 2. Generate embedding vector
+      const embeddingVector = generateEmbeddingVector(payload.description || '', [
+        payload.category,
+        payload.hostelBlock || '',
+        payload.roomNo || '',
+        locationTag,
+      ]);
+
+      // 3. Stage 1 Hard Filter candidates (active, same category, within 72h window)
+      const rawCandidates = getCandidatesForDeduplication(payload.category, 72);
+      const candidates: MatchCandidate[] = rawCandidates.map((c) => ({
+        id: c.id,
+        ticketNo: c.ticketNo,
+        category: c.category,
+        hostelBlock: c.hostelBlock,
+        roomNo: c.roomNo,
+        description: c.description,
+        embeddingVector:
+          c.embeddingVector ||
+          generateEmbeddingVector(c.description, [c.category, c.hostelBlock || '', c.roomNo || '']),
+        status: c.status,
+        masterCaseId: c.masterCaseId,
+        createdAt: c.createdAt,
+      }));
+
+      // 4. Two-Stage Deduplication Match Pipeline
+      const dedupResult = runTwoStageDeduplication(
+        {
+          category: payload.category,
+          description: payload.description || '',
+          hostelBlock: payload.hostelBlock,
+          roomNo: payload.roomNo,
+          studentType: payload.studentType || 'dayscholar',
+          locationTag,
+          embeddingVector,
+        },
+        candidates,
+      );
+
+      // 5. Apply threshold decision
+      let status: GrievanceStatus = payload.status || 'PRIMARY';
+      let masterCaseId: string | null = null;
+      let similarityScore: number | null = null;
+      let mergedAt: string | null = null;
+
+      if (dedupResult.action === 'AUTO_MERGE') {
+        status = 'MERGED_AUTOMATIC';
+        masterCaseId = dedupResult.masterCaseId;
+        similarityScore = dedupResult.similarityScore;
+        mergedAt = new Date().toISOString();
+      } else if (dedupResult.action === 'SUSPECTED_DUPLICATE') {
+        status = 'SUSPECTED_DUPLICATE';
+        masterCaseId = dedupResult.masterCaseId;
+        similarityScore = dedupResult.similarityScore;
+      } else {
+        status = payload.status || 'PRIMARY';
+        masterCaseId = null;
+        similarityScore = null;
+      }
+
+      // 6. Create grievance record in database
+      const created = createGrievance({
+        ...payload,
+        status,
+        masterCaseId,
+        locationTag,
+        sourceTimestamp,
+        embeddingVector,
+        similarityScore: similarityScore ?? undefined,
+        mergedAt: mergedAt ?? undefined,
+      });
+
+      // 7. Enqueue notification in SQLite outbox
+      if (status === 'MERGED_AUTOMATIC') {
+        const emailBody = `Dear ${payload.studentName || 'Student'},\n\nYour complaint has been automatically consolidated under Master Ticket #${dedupResult.matchedTicketNo || 'MASTER'} as an identical issue was already reported. You will automatically receive updates and resolution confirmation.\n\nThank you,\nCollege Grievance Cell.`;
+        sendSimulatedEmail(
+          payload.studentEmail || 'student@college.edu',
+          `Grievance Consolidated - Ticket #${created.ticketNo}`,
+          emailBody,
+          'confirmation',
+        );
+      } else {
+        const emailBody = `Dear ${payload.studentName || 'Student'},\n\nWe got your complaint (Ticket: #${created.ticketNo}, Category: ${created.category}).\n\nOnce the problem has been resolved we will notify you. Thank you.\n\nCollege Grievance Redressal Cell.`;
+        sendSimulatedEmail(
+          payload.studentEmail || 'student@college.edu',
+          `Grievance Registered - Ticket #${created.ticketNo}`,
+          emailBody,
+          'confirmation',
+        );
+      }
+
+      return created;
+    });
+
     res.status(201).json(newGrievance);
   } catch (err: any) {
     console.error('Error creating grievance:', err);
@@ -178,12 +389,155 @@ app.post('/api/grievances', (req: Request, res: Response) => {
   }
 });
 
-app.put('/api/grievances/:id', (req: Request, res: Response) => {
+// Admin manual merge endpoint
+app.post('/api/grievances/merge', (req: Request, res: Response) => {
   try {
-    const updated = updateGrievance(req.params.id, req.body);
+    const { masterId, childId } = req.body;
+    if (!masterId || !childId) {
+      return res.status(400).json({ error: 'masterId and childId are required' });
+    }
+
+    const result = withTransaction(() => {
+      const master = getGrievanceById(masterId);
+      const child = getGrievanceById(childId);
+      if (!master) throw new Error(`Master ticket ${masterId} not found`);
+      if (!child) throw new Error(`Child ticket ${childId} not found`);
+
+      const updatedChild = updateGrievance(childId, {
+        status: 'MERGED_AUTOMATIC',
+        masterCaseId: master.id,
+        mergedAt: new Date().toISOString(),
+      });
+
+      if (!updatedChild) throw new Error('Failed to merge ticket');
+
+      // Enqueue linking notification to child ticket reporter
+      sendSimulatedEmail(
+        child.studentEmail,
+        `Grievance Merged - Ticket #${child.ticketNo}`,
+        `Dear ${child.studentName},\n\nYour grievance #${child.ticketNo} has been merged under Master Ticket #${master.ticketNo}. You will receive resolution updates when the master case is resolved.`,
+        'confirmation',
+      );
+
+      return {
+        success: true,
+        masterCaseId: master.id,
+        childTicketId: child.id,
+      };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error merging tickets:', err);
+    res.status(400).json({ error: err.message || 'Failed to merge tickets' });
+  }
+});
+
+// Admin manual detach endpoint
+app.post('/api/grievances/detach', (req: Request, res: Response) => {
+  try {
+    const { childId } = req.body;
+    if (!childId) {
+      return res.status(400).json({ error: 'childId is required' });
+    }
+
+    const result = withTransaction(() => {
+      const child = getGrievanceById(childId);
+      if (!child) throw new Error(`Ticket ${childId} not found`);
+
+      const updated = updateGrievance(childId, {
+        status: 'PRIMARY',
+        masterCaseId: null,
+        similarityScore: null,
+        mergedAt: null,
+      });
+
+      if (!updated) throw new Error('Failed to detach ticket');
+
+      return {
+        success: true,
+        detachedTicketId: child.id,
+        newStatus: 'PRIMARY',
+      };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error detaching ticket:', err);
+    res.status(400).json({ error: err.message || 'Failed to detach ticket' });
+  }
+});
+
+// Admin public master notes update endpoint
+app.put('/api/grievances/:id/master-notes', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { publicMasterNotes } = req.body;
+    if (typeof publicMasterNotes !== 'string') {
+      return res.status(400).json({ error: 'publicMasterNotes string is required' });
+    }
+
+    const updated = updateGrievance(id, { publicMasterNotes });
     if (!updated) {
       return res.status(404).json({ error: 'Grievance not found' });
     }
+
+    res.json({
+      success: true,
+      id: updated.id,
+      publicMasterNotes: updated.publicMasterNotes || '',
+    });
+  } catch (err: any) {
+    console.error('Error updating master notes:', err);
+    res.status(400).json({ error: err.message || 'Failed to update master notes' });
+  }
+});
+
+app.put('/api/grievances/:id', (req: Request, res: Response) => {
+  try {
+    const updated = withTransaction(() => {
+      const prev = getGrievanceById(req.params.id);
+      const updatedRecord = updateGrievance(req.params.id, req.body);
+      if (!updatedRecord) {
+        return null;
+      }
+
+      // Master ticket resolution broadcast fan-out
+      if (req.body.status === 'resolved' || (updatedRecord.status === 'resolved' && prev?.status !== 'resolved')) {
+        // 1. Notify master ticket reporter
+        sendSimulatedEmail(
+          updatedRecord.studentEmail,
+          `Grievance Resolved - Ticket #${updatedRecord.ticketNo}`,
+          `Dear ${updatedRecord.studentName},\n\nYour grievance (Ticket #${updatedRecord.ticketNo}, Category: ${updatedRecord.category}) has been resolved.\n\n${updatedRecord.publicMasterNotes || updatedRecord.adminNotes ? 'Notes: ' + (updatedRecord.publicMasterNotes || updatedRecord.adminNotes) + '\n\n' : ''}Thank you for your patience.`,
+          'resolution',
+        );
+
+        // 2. Broadcast resolution to all subscribed child ticket reporters
+        const children = getChildGrievances(updatedRecord.id);
+        for (const child of children) {
+          if (child.status !== 'resolved') {
+            updateGrievance(child.id, {
+              status: 'resolved',
+              resolvedAt: new Date().toISOString(),
+            });
+          }
+
+          sendSimulatedEmail(
+            child.studentEmail,
+            `Grievance Resolved - Master Case #${updatedRecord.ticketNo}`,
+            `Dear ${child.studentName},\n\nThe master issue (Case #${updatedRecord.ticketNo}, Category: ${updatedRecord.category}) linked to your ticket #${child.ticketNo} has been marked as resolved.\n\n${updatedRecord.publicMasterNotes || updatedRecord.adminNotes ? 'Public Resolution Notes: ' + (updatedRecord.publicMasterNotes || updatedRecord.adminNotes) + '\n\n' : ''}Thank you,\nCollege Grievance Redressal Team.`,
+            'resolution',
+          );
+        }
+      }
+
+      return updatedRecord;
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Grievance not found' });
+    }
+
     res.json(updated);
   } catch (err: any) {
     console.error('Error updating grievance:', err);
@@ -237,7 +591,53 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
   }
 });
 
-// 5. Request OTP for Signup / Verification (Completely works locally with zero API key)
+// Real User Direct Registration Endpoint
+app.post('/api/auth/register', (req: Request, res: Response) => {
+  try {
+    const { regNo, name, email, password, department, gender, studentType, phone, hostelBlock, roomNo } = req.body;
+
+    if (!regNo || !name || !email || !password) {
+      return res.status(400).json({ error: 'Register Number, Name, Email, and Password are required.' });
+    }
+
+    const cleanRegNo = regNo.toString().trim().toUpperCase();
+    const cleanEmail = email.toString().trim().toLowerCase();
+
+    // Check if Register Number is already registered
+    const existingReg = getUserByRegNo(cleanRegNo);
+    if (existingReg) {
+      return res.status(409).json({ error: `An account with Register Number "${cleanRegNo}" already exists. Please sign in instead.` });
+    }
+
+    // Check if Email is already in use
+    const existingEmail = getUserByEmail(cleanEmail);
+    if (existingEmail) {
+      return res.status(409).json({ error: `An account with email "${cleanEmail}" already exists. Please sign in instead.` });
+    }
+
+    const newUser = upsertUser({
+      regNo: cleanRegNo,
+      name: name.toString().trim(),
+      email: cleanEmail,
+      department: department || undefined,
+      gender: gender || 'Male',
+      studentType: studentType || 'hosteller',
+      phone: phone ? phone.toString().trim() : '',
+      hostelBlock: studentType === 'hosteller' ? hostelBlock : undefined,
+      roomNo: studentType === 'hosteller' ? (roomNo ? roomNo.toString().trim() : undefined) : undefined,
+      role: 'student',
+      isEmailVerified: true,
+      password: password.toString().trim(),
+    });
+
+    return res.status(201).json({ success: true, user: newUser });
+  } catch (err: any) {
+    console.error('Registration error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to complete registration.' });
+  }
+});
+
+// 5. Request OTP for Signup / Verification (Optional real email delivery)
 app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   const { email, regNo, name } = req.body;
   if (!email) {
@@ -248,10 +648,6 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = Date.now() + 5 * 60 * 1000; // 5 mins
   otpStore.set(email.toLowerCase(), { otp, expiresAt });
-
-  console.log(`\n========================================`);
-  console.log(`🔑 [LOCAL AUTH] Verification OTP for ${email}: ${otp}`);
-  console.log(`========================================\n`);
 
   const subject = 'Verification Code (OTP) - AI Student Grievance Portal';
   const textBody = `Hello ${name || 'Student'},\n\nYour 6-digit One-Time Password (OTP) for verification and registration at the AI Student Grievance Portal is: ${otp}\n\nThis code is valid for 5 minutes. Please do not share this OTP with anyone.\n\nWarm regards,\nCollege Student Grievance Redressal Cell`;
@@ -286,9 +682,8 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     success: true,
     message: sentViaGmail
       ? `OTP code sent directly to ${email} via Gmail.`
-      : `Verification OTP generated: ${otp}. (Check console or in-app notification)`,
+      : `Verification code sent to ${email}.`,
     email,
-    otpCode: otp,
     sentViaGmail,
     sentEmail: sentSimulated,
   });

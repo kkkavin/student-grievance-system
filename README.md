@@ -26,7 +26,7 @@ The application will start immediately at:
 ### Student Login
 - **Register Number:** `2023CS042`
 - **Password:** `student123`
-- *(Or sign up with any new registration number using the automated local OTP verification)*
+- *(Or sign up with any new registration number directly via the Sign Up tab)*
 
 ### Administrator Login
 - Securely configured for authorized personnel (configurable via `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables). Login credentials are kept private and not exposed on public UI views.
@@ -56,9 +56,9 @@ The application will start immediately at:
    - Replaced all Firebase Firestore SDK calls (`collection`, `doc`, `onSnapshot`, `setDoc`, `addDoc`) with typed REST API calls.
    - Removed `firebase` dependency and `src/firebase.ts`.
 
-4. **Zero API Key Dependency:**
+4. **Zero API Key Dependency & Production-Ready Flow:**
    - **No Gemini API Key Needed:** Local rule-based heuristic classifier analyzes complaint spam, keyboard smashes, and automatically categorizes tickets locally.
-   - **No Email API Key Needed:** OTP verification works completely offline and locally, logging OTP codes to the terminal and providing a quick one-click Auto-fill in the UI.
+   - **Production-Ready Registration:** Students register directly using their credentials without OTP hurdles or mock local verification codes.
 
 ---
 

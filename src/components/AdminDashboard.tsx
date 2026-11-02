@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Shield,
   Star,
@@ -29,6 +29,8 @@ import {
   ChevronDown,
   FileText,
   TrendingUp,
+  Layers,
+  GitMerge,
 } from 'lucide-react';
 import { Grievance, PriorityLevel, GrievanceStatus } from '../types';
 import {
@@ -40,6 +42,9 @@ import {
   ChartDatum,
 } from './Charts';
 import { ReportDownloader } from './ReportDownloader';
+import { PredictiveAnalyticsDashboard } from './PredictiveAnalyticsDashboard';
+import { TriageModerationView } from './TriageModerationView';
+import { fetchTriageQueueApi } from '../api';
 
 interface AdminDashboardProps {
   grievances: Grievance[];
@@ -52,7 +57,7 @@ const ITEMS_PER_PAGE = 8;
 
 export type VisualType = 'bar' | 'horizontal_bar' | 'pie' | 'donut' | 'ledger';
 export type VisualDimension = 'category' | 'status' | 'priority' | 'residency';
-export type ActiveViewSection = 'queue' | 'analytics';
+export type ActiveViewSection = 'queue' | 'triage' | 'analytics';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   grievances,
@@ -80,6 +85,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Feature 2: Sort State
   const [sortOption, setSortOption] = useState<string>('date_desc');
+
+  // Suspected duplicates count for triage badge
+  const suspectedCount = useMemo(() => {
+    return grievances.filter((g) => g.status === 'SUSPECTED_DUPLICATE').length;
+  }, [grievances]);
+
+  const [triageCount, setTriageCount] = useState<number>(0);
+
+  // Synchronize triage count from backend API
+  const refreshTriageCount = useCallback(() => {
+    let isMounted = true;
+    fetchTriageQueueApi()
+      .then((res) => {
+        if (isMounted && res?.suspectedDuplicates) {
+          setTriageCount(res.suspectedDuplicates.length);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    refreshTriageCount();
+  }, [grievances, refreshTriageCount]);
 
   // Pagination & Inspection Modal States
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -471,67 +502,118 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. PERMANENT FILTER & SORT STATION (Positioned at top, below Download)   */}
+      {/* 1.5 ADMIN CONSOLE 3-WAY VIEW NAVIGATION                                  */}
       {/* ========================================================================= */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4 transition-colors">
-        {/* Row 1: Resized Search Bar + Visual Analytics Toggle (Right of Search) + Sort & Reset */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 justify-between">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1">
-            {/* Resized Keyword Search */}
-            <div className="relative w-full sm:w-64 md:w-72">
-              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                id="admin-search-input"
-                type="text"
-                placeholder="Search ticket #, student, room..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-9 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 font-medium"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  title="Clear search"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+        <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+          {/* Tab 1: All Tickets / Grievance Management */}
+          <button
+            id="toggle-view-queue"
+            type="button"
+            onClick={() => setActiveViewSection('queue')}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeViewSection === 'queue'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+            title="View Grievance Management Queue"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>All Tickets</span>
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold leading-none ${
+                activeViewSection === 'queue'
+                  ? 'bg-blue-500/80 text-white'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              {totalCount}
+            </span>
+          </button>
 
-            {/* Toggle for Visual Analytics placed directly to the right of the Search Bar */}
-            <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shrink-0 self-start sm:self-auto">
-              <button
-                id="toggle-view-queue"
-                type="button"
-                onClick={() => setActiveViewSection('queue')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                  activeViewSection === 'queue'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title="View Grievance List"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>Grievance List</span>
-              </button>
+          {/* Tab 2: Predictive Analytics & Risk */}
+          <button
+            id="toggle-view-analytics"
+            type="button"
+            onClick={() => setActiveViewSection('analytics')}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeViewSection === 'analytics'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+            title="View Predictive Campus Issue Analytics & Risk Dashboard"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Predictive Analytics &amp; Risk</span>
+          </button>
 
-              <button
-                id="toggle-view-analytics"
-                type="button"
-                onClick={() => setActiveViewSection('analytics')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                  activeViewSection === 'analytics'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title="View Visual Analytics Overview"
-              >
-                <PieChartIcon className="w-3.5 h-3.5" />
-                <span>Visual Analytics</span>
-              </button>
+          {/* Tab 3: Duplicate Triage Moderation */}
+          <button
+            id="toggle-view-triage"
+            type="button"
+            onClick={() => {
+              setActiveViewSection('triage');
+              refreshTriageCount();
+            }}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer relative ${
+              activeViewSection === 'triage'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+            title="View Intelligent Duplicate Triage &amp; Consolidation Moderation"
+          >
+            <GitMerge className="w-3.5 h-3.5" />
+            <span>Duplicate Triage Moderation</span>
+            {(triageCount > 0 || suspectedCount > 0) && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500 text-white leading-none shadow-2xs">
+                {triageCount || suspectedCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono px-2">
+          <span>Active View:</span>
+          <span className="font-bold text-slate-900 dark:text-white uppercase">
+            {activeViewSection === 'queue'
+              ? 'All Tickets'
+              : activeViewSection === 'triage'
+              ? 'Triage Moderation'
+              : 'Predictive Analytics & Risk'}
+          </span>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 2. PERMANENT FILTER & SORT STATION (Rendered when 'queue' is active)     */}
+      {/* ========================================================================= */}
+      {activeViewSection === 'queue' && (
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4 transition-colors">
+          {/* Row 1: Search Bar + Sort & Reset */}
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 justify-between">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1">
+              {/* Keyword Search */}
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="admin-search-input"
+                  type="text"
+                  placeholder="Search ticket #, student, room..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-9 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 font-medium"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    title="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
 
           {/* Sort Selector & Active Filters Reset */}
           <div className="flex items-center gap-2">
@@ -683,12 +765,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* ========================================================================= */}
-      {/* 3. VISUAL ANALYTICS OVERVIEW (Rendered when 'analytics' is active)        */}
+      {/* 3. TRIAGE CENTER (Rendered when 'triage' is active)                       */}
+      {/* ========================================================================= */}
+      {activeViewSection === 'triage' && (
+        <TriageModerationView
+          onTriageHandled={refreshTriageCount}
+        />
+      )}
+
+      {/* ========================================================================= */}
+      {/* 4. PREDICTIVE ANALYTICS & RISK (Rendered when 'analytics' is active)       */}
       {/* ========================================================================= */}
       {activeViewSection === 'analytics' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-5 transition-colors">
+        <div className="space-y-6">
+          <PredictiveAnalyticsDashboard
+            onNavigateToTriage={() => setActiveViewSection('triage')}
+          />
+
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-5 transition-colors">
           {/* Visual Header: Title, Metric, Dimension Selector & Visual Type Switcher */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div>
@@ -933,6 +1030,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </>
             )}
           </div>
+        </div>
         </div>
       )}
 

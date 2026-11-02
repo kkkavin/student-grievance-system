@@ -7,6 +7,8 @@ import {
   PriorityLevel,
   GrievanceStatus,
   StudentType,
+  TriageGrievance,
+  TriageCandidateMaster,
 } from "./src/types";
 import { INITIAL_GRIEVANCES } from "./src/data/initialData";
 
@@ -19,6 +21,7 @@ export function getDatabase(): DatabaseSync {
     dbInstance = new DatabaseSync(DB_PATH);
     dbInstance.exec("PRAGMA journal_mode = WAL;");
     dbInstance.exec("PRAGMA foreign_keys = ON;");
+    dbInstance.exec("PRAGMA busy_timeout = 5000;");
     initSchema(dbInstance);
   }
   return dbInstance;
@@ -66,8 +69,68 @@ function initSchema(db: DatabaseSync) {
       aiClassification TEXT,
       createdAt TEXT NOT NULL,
       resolvedAt TEXT,
-      adminNotes TEXT
+      adminNotes TEXT,
+      master_case_id TEXT NULL REFERENCES grievances(id),
+      location_tag TEXT NULL,
+      source_timestamp TEXT NULL,
+      embedding_vector TEXT NULL,
+      similarity_score REAL NULL,
+      merged_at TEXT NULL,
+      public_master_notes TEXT NULL
     );
+  `);
+
+  // Dynamic migration checks for existing databases
+  const grievanceColumns = (
+    db.prepare("PRAGMA table_info(grievances)").all() as Array<{ name: string }>
+  ).map((c) => c.name);
+
+  const migrations: Array<{ name: string; ddl: string }> = [
+    {
+      name: "master_case_id",
+      ddl: "ALTER TABLE grievances ADD COLUMN master_case_id TEXT NULL REFERENCES grievances(id)",
+    },
+    {
+      name: "location_tag",
+      ddl: "ALTER TABLE grievances ADD COLUMN location_tag TEXT NULL",
+    },
+    {
+      name: "source_timestamp",
+      ddl: "ALTER TABLE grievances ADD COLUMN source_timestamp TEXT NULL",
+    },
+    {
+      name: "embedding_vector",
+      ddl: "ALTER TABLE grievances ADD COLUMN embedding_vector TEXT NULL",
+    },
+    {
+      name: "similarity_score",
+      ddl: "ALTER TABLE grievances ADD COLUMN similarity_score REAL NULL",
+    },
+    {
+      name: "merged_at",
+      ddl: "ALTER TABLE grievances ADD COLUMN merged_at TEXT NULL",
+    },
+    {
+      name: "public_master_notes",
+      ddl: "ALTER TABLE grievances ADD COLUMN public_master_notes TEXT NULL",
+    },
+  ];
+
+  for (const m of migrations) {
+    if (!grievanceColumns.includes(m.name)) {
+      try {
+        db.exec(m.ddl);
+      } catch (err) {
+        console.warn(`Migration ${m.name} failed or already applied:`, err);
+      }
+    }
+  }
+
+  // Deduplication & performance indexes
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_grievances_master ON grievances(master_case_id);
+    CREATE INDEX IF NOT EXISTS idx_grievances_dedup ON grievances(category, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_grievances_status ON grievances(status);
   `);
 
   // 3. Create Outbox / Notifications Table
@@ -175,6 +238,15 @@ function initSchema(db: DatabaseSync) {
 
 // Format SQLite row to Grievance interface
 function formatGrievanceRow(row: any): Grievance {
+  let embeddingVector: number[] | undefined;
+  if (row.embedding_vector) {
+    try {
+      embeddingVector = JSON.parse(row.embedding_vector);
+    } catch {
+      embeddingVector = undefined;
+    }
+  }
+
   return {
     id: row.id,
     ticketNo: row.ticketNo,
@@ -197,6 +269,17 @@ function formatGrievanceRow(row: any): Grievance {
     createdAt: row.createdAt,
     resolvedAt: row.resolvedAt || undefined,
     adminNotes: row.adminNotes || undefined,
+    masterCaseId:
+      row.master_case_id !== undefined ? row.master_case_id : undefined,
+    locationTag: row.location_tag || undefined,
+    sourceTimestamp: row.source_timestamp || undefined,
+    embeddingVector,
+    similarityScore:
+      row.similarity_score !== null && row.similarity_score !== undefined
+        ? Number(row.similarity_score)
+        : undefined,
+    mergedAt: row.merged_at || undefined,
+    publicMasterNotes: row.public_master_notes || undefined,
   };
 }
 
@@ -242,9 +325,10 @@ export function createGrievance(data: Partial<Grievance>): Grievance {
   const db = getDatabase();
 
   const id = data.id || "tkt_" + Math.random().toString(36).substring(2, 9);
+  const year = new Date().getFullYear();
   const ticketNo =
     data.ticketNo ||
-    `GRV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    `GRV-${year}-${Date.now().toString(36).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
   const createdAt = data.createdAt || new Date().toISOString();
   const status = data.status || "pending";
   const priority = data.priority || "medium";
@@ -252,13 +336,25 @@ export function createGrievance(data: Partial<Grievance>): Grievance {
   const aiClassification = data.aiClassification
     ? JSON.stringify(data.aiClassification)
     : null;
+  const masterCaseId =
+    data.masterCaseId !== undefined ? data.masterCaseId : null;
+  const locationTag = data.locationTag || null;
+  const sourceTimestamp = data.sourceTimestamp || null;
+  const embeddingVector = data.embeddingVector
+    ? JSON.stringify(data.embeddingVector)
+    : null;
+  const similarityScore =
+    data.similarityScore !== undefined ? data.similarityScore : null;
+  const mergedAt = data.mergedAt || null;
+  const publicMasterNotes = data.publicMasterNotes || null;
 
   const stmt = db.prepare(`
     INSERT INTO grievances (
       id, ticketNo, studentRegNo, studentName, studentEmail, studentPhone, studentType,
       hostelBlock, roomNo, category, description, status, priority, isSpam, spamReason,
-      aiClassification, createdAt, resolvedAt, adminNotes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      aiClassification, createdAt, resolvedAt, adminNotes,
+      master_case_id, location_tag, source_timestamp, embedding_vector, similarity_score, merged_at, public_master_notes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -281,6 +377,13 @@ export function createGrievance(data: Partial<Grievance>): Grievance {
     createdAt,
     data.resolvedAt || null,
     data.adminNotes || null,
+    masterCaseId,
+    locationTag,
+    sourceTimestamp,
+    embeddingVector,
+    similarityScore,
+    mergedAt,
+    publicMasterNotes,
   );
 
   return getGrievanceById(id)!;
@@ -329,6 +432,36 @@ export function updateGrievance(
     fields.push("spamReason = ?");
     params.push(updates.spamReason);
   }
+  if (updates.masterCaseId !== undefined) {
+    fields.push("master_case_id = ?");
+    params.push(updates.masterCaseId);
+  }
+  if (updates.locationTag !== undefined) {
+    fields.push("location_tag = ?");
+    params.push(updates.locationTag);
+  }
+  if (updates.sourceTimestamp !== undefined) {
+    fields.push("source_timestamp = ?");
+    params.push(updates.sourceTimestamp);
+  }
+  if (updates.embeddingVector !== undefined) {
+    fields.push("embedding_vector = ?");
+    params.push(
+      updates.embeddingVector ? JSON.stringify(updates.embeddingVector) : null,
+    );
+  }
+  if (updates.similarityScore !== undefined) {
+    fields.push("similarity_score = ?");
+    params.push(updates.similarityScore);
+  }
+  if (updates.mergedAt !== undefined) {
+    fields.push("merged_at = ?");
+    params.push(updates.mergedAt);
+  }
+  if (updates.publicMasterNotes !== undefined) {
+    fields.push("public_master_notes = ?");
+    params.push(updates.publicMasterNotes);
+  }
 
   if (fields.length === 0) return existing;
 
@@ -337,6 +470,113 @@ export function updateGrievance(
   db.prepare(sql).run(...params);
 
   return getGrievanceById(id);
+}
+
+export function withTransaction<T>(fn: () => T): T {
+  const db = getDatabase();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // rollback could fail if already rolled back
+    }
+    throw err;
+  }
+}
+
+export function getChildGrievances(masterCaseId: string): Grievance[] {
+  const db = getDatabase();
+  const stmt = db.prepare(
+    "SELECT * FROM grievances WHERE master_case_id = ? ORDER BY createdAt ASC",
+  );
+  const rows = stmt.all(masterCaseId);
+  return rows.map(formatGrievanceRow);
+}
+
+export function getCandidatesForDeduplication(
+  category: string,
+  hoursAgo: number = 72,
+): Grievance[] {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    SELECT * FROM grievances
+    WHERE category = ?
+      AND status NOT IN ('MERGED_AUTOMATIC', 'resolved')
+      AND datetime(createdAt) >= datetime('now', '-' || ? || ' hours')
+    ORDER BY createdAt DESC
+  `);
+  const rows = stmt.all(category, hoursAgo);
+  return rows.map(formatGrievanceRow);
+}
+
+export function getTriageGrievances(): TriageGrievance[] {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    SELECT * FROM grievances
+    WHERE status = 'SUSPECTED_DUPLICATE'
+    ORDER BY createdAt DESC
+  `);
+  const rows = stmt.all();
+  const list: TriageGrievance[] = [];
+
+  for (const row of rows) {
+    const child = formatGrievanceRow(row);
+    let candidateMaster: TriageCandidateMaster;
+
+    if (child.masterCaseId) {
+      const master = getGrievanceById(child.masterCaseId);
+      if (master) {
+        candidateMaster = {
+          id: master.id,
+          ticketNo: master.ticketNo,
+          description: master.description,
+          studentName: master.studentName,
+          status: master.status,
+          createdAt: master.createdAt,
+          publicMasterNotes: master.publicMasterNotes || '',
+        };
+      } else {
+        candidateMaster = {
+          id: child.masterCaseId,
+          ticketNo: "UNKNOWN",
+          description: "Candidate master ticket",
+          studentName: "Unknown",
+          status: "pending",
+          createdAt: child.createdAt,
+          publicMasterNotes: '',
+        };
+      }
+    } else {
+      candidateMaster = {
+        id: "",
+        ticketNo: "N/A",
+        description: "No master assigned",
+        studentName: "N/A",
+        status: "pending",
+        createdAt: child.createdAt,
+        publicMasterNotes: '',
+      };
+    }
+
+    list.push({
+      id: child.id,
+      ticketNo: child.ticketNo,
+      category: child.category,
+      description: child.description,
+      studentName: child.studentName,
+      studentRegNo: child.studentRegNo,
+      createdAt: child.createdAt,
+      similarityScore: child.similarityScore ?? 0,
+      candidateMaster,
+    });
+  }
+
+  return list;
 }
 
 // ======================== USER METHODS ========================
@@ -493,6 +733,7 @@ export function saveOutboxEmail(emailItem: {
 export function getOutboxEmails(filterEmail?: string): Array<{
   id: string;
   to: string;
+  recipient: string;
   subject: string;
   body: string;
   type: "otp" | "confirmation" | "resolution";
@@ -514,6 +755,7 @@ export function getOutboxEmails(filterEmail?: string): Array<{
   return rows.map((r) => ({
     id: r.id,
     to: r.recipient,
+    recipient: r.recipient,
     subject: r.subject,
     body: r.body,
     type: r.type as "otp" | "confirmation" | "resolution",
