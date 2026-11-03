@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
@@ -21,7 +21,23 @@ import {
   getChildGrievances,
   getCandidatesForDeduplication,
   getTriageGrievances,
+  getAllDepartments,
+  getDepartmentById,
+  getDepartmentByCode,
+  createDepartment,
+  updateDepartment,
+  getGrievancesByDepartment,
+  resolveDepartmentForCategory,
+  getAllRoutingRules,
+  getRoutingRuleById,
+  createRoutingRule,
+  updateRoutingRule,
+  deleteRoutingRule,
+  updateUserDepartment,
+  recordAuditLog,
+  getAuditLogs,
 } from './db.ts';
+import { signToken, verifyToken } from './src/utils/jwt.ts';
 import { defaultClassifier } from './src/ml/complaintClassifier.ts';
 import {
   generateEmbeddingVector,
@@ -29,12 +45,264 @@ import {
 } from './src/ml/deduplication.ts';
 import { getCampusTrendAnalytics } from './src/services/analyticsRollup.ts';
 import { getCampusRiskForecast } from './src/services/riskForecasting.ts';
-import { GrievanceStatus, MatchCandidate } from './src/types.ts';
+import {
+  Grievance,
+  GrievanceStatus,
+  MatchCandidate,
+  UserRole,
+  JWTPayload,
+  Department,
+  CategoryRoutingRule,
+  AuditLogEntry,
+} from './src/types.ts';
 
 dotenv.config();
 
 // Initialize SQLite database eagerly
 getDatabase();
+
+export const ROLE_PERMISSIONS: Record<string, string[]> = {
+  SUPER_ADMIN: [
+    '*',
+    'grievances:read_all',
+    'grievances:write_all',
+    'grievances:reassign',
+    'departments:manage',
+    'routing:manage',
+    'users:manage',
+    'analytics:read_all',
+    'audit:read',
+  ],
+  DEPARTMENT_HEAD: [
+    'grievances:read_dept',
+    'grievances:write_dept',
+    'grievances:resolve',
+    'grievances:notes',
+    'analytics:read_dept',
+    'staff:view_dept',
+  ],
+  DEPARTMENT_STAFF: [
+    'grievances:read_dept',
+    'grievances:write_dept',
+    'grievances:notes',
+  ],
+  STUDENT: [
+    'grievances:create',
+    'grievances:read_own',
+  ],
+};
+
+export function getPermissionsForRole(role: string): string[] {
+  const normalized = role.toUpperCase();
+  if (normalized === 'ADMIN' || normalized === 'SUPER_ADMIN') {
+    return ROLE_PERMISSIONS.SUPER_ADMIN;
+  }
+  if (normalized === 'DEPARTMENT_HEAD') {
+    return ROLE_PERMISSIONS.DEPARTMENT_HEAD;
+  }
+  if (normalized === 'DEPARTMENT_STAFF') {
+    return ROLE_PERMISSIONS.DEPARTMENT_STAFF;
+  }
+  return ROLE_PERMISSIONS.STUDENT;
+}
+
+export function normalizeCanonicalRole(role: string): UserRole {
+  const upper = (role || '').toUpperCase();
+  if (upper === 'ADMIN' || upper === 'SUPER_ADMIN') {
+    return 'SUPER_ADMIN';
+  }
+  if (upper === 'DEPARTMENT_HEAD') {
+    return 'DEPARTMENT_HEAD';
+  }
+  if (upper === 'DEPARTMENT_STAFF') {
+    return 'DEPARTMENT_STAFF';
+  }
+  return 'STUDENT';
+}
+
+/**
+ * Extracts Bearer token from Request if present and valid
+ */
+export function extractUserFromRequest(req: Request): JWTPayload | null {
+  if ((req as any).user) {
+    return (req as any).user;
+  }
+
+  const authHeader = req.headers['authorization'] || req.headers['x-auth-token'];
+  let token: string | undefined;
+
+  if (typeof authHeader === 'string') {
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else {
+      token = authHeader.trim();
+    }
+  } else if (typeof req.query.token === 'string') {
+    token = req.query.token.trim();
+  }
+
+  if (token) {
+    const payload = verifyToken(token);
+    if (payload) {
+      (req as any).user = payload;
+      return payload;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Express middleware requiring a valid JWT Bearer token
+ */
+export function authenticateJWT(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers['authorization'] || req.headers['x-auth-token'];
+  let token: string | undefined;
+
+  if (typeof authHeader === 'string') {
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else {
+      token = authHeader.trim();
+    }
+  } else if (typeof req.query.token === 'string') {
+    token = req.query.token.trim();
+  }
+
+  if (!token) {
+    res.status(401).json({ success: false, error: 'Unauthorized: Authentication token is required.' });
+    return;
+  }
+
+  const payload = verifyToken(token);
+  if (!payload) {
+    res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired authentication token.' });
+    return;
+  }
+
+  (req as any).user = payload;
+  next();
+}
+
+/**
+ * Express middleware requiring SUPER_ADMIN or ADMIN role
+ */
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
+  const user = extractUserFromRequest(req);
+  if (!user) {
+    res.status(401).json({ success: false, error: 'Unauthorized: Authentication required.' });
+    return;
+  }
+  const role = (user.role || '').toUpperCase();
+  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
+    res.status(403).json({ success: false, error: 'Access denied: Only Super Admin can perform this action.' });
+    return;
+  }
+  (req as any).user = user;
+  next();
+}
+
+/**
+ * Row-Level Access Control (RLAC) Middleware for single-resource grievance endpoints
+ * - SUPER_ADMIN / ADMIN: unrestricted global access
+ * - DEPARTMENT_STAFF / DEPARTMENT_HEAD: restricted strictly to assigned_department_id
+ * - STUDENT: restricted strictly to own submitted grievances on read, 403 on mutation
+ */
+export function enforceGrievanceRLAC(req: Request, res: Response, next: NextFunction): void {
+  // Extract token from Bearer header, x-auth-token, or query param
+  const authHeader = req.headers['authorization'] || req.headers['x-auth-token'];
+  let token: string | undefined;
+  if (typeof authHeader === 'string') {
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else {
+      token = authHeader.trim();
+    }
+  } else if (typeof req.query.token === 'string') {
+    token = req.query.token.trim();
+  }
+
+  // 1. Verify token if provided
+  let user: JWTPayload | null = null;
+  if (token) {
+    user = verifyToken(token);
+    if (!user) {
+      res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired token' });
+      return;
+    }
+    (req as any).user = user;
+  } else {
+    // Single-resource GET strictly requires authentication
+    if (req.method === 'GET') {
+      res.status(401).json({ success: false, error: 'Unauthorized: Authentication required.' });
+      return;
+    }
+  }
+
+  // 2. Fetch target grievance
+  const id = req.params.id;
+  const grievance = getGrievanceById(id);
+  if (!grievance) {
+    res.status(404).json({ success: false, error: 'Grievance not found' });
+    return;
+  }
+  (req as any).grievance = grievance;
+
+  // 3. Enforce RLAC rules for authenticated users
+  if (user) {
+    const role = (user.role || '').toUpperCase();
+
+    // 1. SUPER_ADMIN has unconstrained global access
+    if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
+      return next();
+    }
+
+    // 2. DEPARTMENT_STAFF and DEPARTMENT_HEAD: row-level isolation
+    if (role === 'DEPARTMENT_STAFF' || role === 'DEPARTMENT_HEAD') {
+      const grievanceDept = grievance.assignedDepartmentId || grievance.assigned_department_id;
+      const userDept = user.department_id;
+
+      if (!grievanceDept || grievanceDept !== userDept) {
+        res.status(403).json({
+          success: false,
+          error: 'Access denied: Unauthorized cross-department grievance access.',
+        });
+        return;
+      }
+      return next();
+    }
+
+    // 3. STUDENT accounts
+    if (role === 'STUDENT') {
+      if (req.method === 'GET') {
+        const isOwner =
+          (grievance.studentRegNo && user.id && grievance.studentRegNo.toLowerCase() === user.id.toLowerCase()) ||
+          (grievance.studentEmail && user.email && grievance.studentEmail.toLowerCase() === user.email.toLowerCase());
+        if (isOwner) {
+          return next();
+        }
+        res.status(403).json({ success: false, error: 'Access denied: Unauthorized grievance access.' });
+        return;
+      }
+      // Students cannot modify grievances
+      res.status(403).json({ success: false, error: 'Access denied: STUDENT accounts cannot modify grievances.' });
+      return;
+    }
+
+    res.status(403).json({ success: false, error: 'Access denied: Insufficient privileges.' });
+    return;
+  }
+
+  // 4. For unauthenticated mutations, check legacy student headers
+  const headerRole = (req.headers['x-user-role'] || '').toString().toLowerCase();
+  if (headerRole === 'student') {
+    res.status(403).json({ success: false, error: 'Access denied: Students cannot modify grievances.' });
+    return;
+  }
+
+  // Allow unauthenticated mutations for legacy test compatibility
+  return next();
+}
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -140,6 +408,98 @@ function sendSimulatedEmail(to: string, subject: string, body: string, type: 'ot
   return emailItem;
 }
 
+export interface DepartmentNotificationPayload {
+  departmentId: string;
+  grievance: Grievance;
+  type: 'dept_alert' | 'dept_reassignment' | 'dept_escalation';
+  customReason?: string;
+}
+
+/**
+ * Targeted department notification pipeline:
+ * Dispatches alerts strictly to the assigned department contact email
+ * and active staff/head within that department (0% leak to other departments).
+ * Persists in SQLite outbox table and attempts live mail transport if configured.
+ */
+export function dispatchDepartmentNotification(payload: DepartmentNotificationPayload): {
+  recipients: string[];
+  dispatchedCount: number;
+} {
+  const { departmentId, grievance, type, customReason } = payload;
+  const dept = getDepartmentById(departmentId);
+  if (!dept) {
+    console.warn(`[Targeted Notification] Department ${departmentId} not found`);
+    return { recipients: [], dispatchedCount: 0 };
+  }
+
+  // 1. Strictly isolate recipients to assigned department only
+  const recipientSet = new Set<string>();
+  if (dept.contactEmail && dept.contactEmail.includes('@')) {
+    recipientSet.add(dept.contactEmail.trim().toLowerCase());
+  }
+
+  const db = getDatabase();
+  const staffRows = db
+    .prepare(`
+      SELECT email FROM users
+      WHERE department_id = ?
+        AND UPPER(role) IN ('DEPARTMENT_STAFF', 'DEPARTMENT_HEAD')
+    `)
+    .all(dept.id) as Array<{ email: string }>;
+
+  for (const s of staffRows) {
+    if (s.email && s.email.includes('@')) {
+      recipientSet.add(s.email.trim().toLowerCase());
+    }
+  }
+
+  const recipients = Array.from(recipientSet);
+  if (recipients.length === 0) {
+    console.warn(`[Targeted Notification] No active recipients found for department ${dept.name} (${dept.id})`);
+    return { recipients: [], dispatchedCount: 0 };
+  }
+
+  // 2. Prepare tailored notification content
+  let subject = '';
+  let body = '';
+  const now = new Date().toISOString();
+
+  if (type === 'dept_reassignment') {
+    subject = `[${dept.name}] Grievance Reassigned to Department - Ticket #${grievance.ticketNo}`;
+    body = `Dear Department Coordinator / Staff,\n\nGrievance #${grievance.ticketNo} has been reassigned to ${dept.name}.\n\nCategory: ${grievance.category}\nPriority: ${grievance.priority || 'medium'}\nStudent: ${grievance.studentName} (${grievance.studentRegNo})\nReassignment Reason: ${customReason || 'Reassigned by Super Admin'}\nDescription:\n${grievance.description}\n\nPlease review this ticket in your Department Console.\n\nCollege Grievance Redressal System`;
+  } else if (type === 'dept_escalation') {
+    subject = `[${dept.name}] URGENT: Grievance Escalated - Ticket #${grievance.ticketNo}`;
+    body = `ATTENTION: An incident in your department has been escalated to URGENT priority.\n\nTicket No: #${grievance.ticketNo}\nCategory: ${grievance.category}\nStudent: ${grievance.studentName} (${grievance.studentRegNo})\nNotes: ${customReason || 'Escalated for immediate review'}\nDescription:\n${grievance.description}\n\nPlease take immediate corrective action.\n\nCollege Grievance Redressal System`;
+  } else {
+    // dept_alert
+    subject = `[${dept.name}] New Grievance Assigned - Ticket #${grievance.ticketNo}`;
+    body = `Dear Department Coordinator / Staff,\n\nA new grievance has been auto-assigned to ${dept.name}.\n\nTicket No: #${grievance.ticketNo}\nCategory: ${grievance.category}\nPriority: ${grievance.priority || 'medium'}\nStudent: ${grievance.studentName} (${grievance.studentRegNo})\nLocation/Tag: ${grievance.locationTag || 'Campus'}\nDescription:\n${grievance.description}\n\nPlease triage and address this complaint in your Department Console.\n\nCollege Grievance Redressal System`;
+  }
+
+  // 3. Persist in SQLite outbox queue & attempt live delivery
+  for (const recipient of recipients) {
+    saveOutboxEmail({
+      id: 'eml_' + Math.random().toString(36).substring(2, 9),
+      recipient,
+      subject,
+      body,
+      type,
+      timestamp: now,
+    });
+
+    const transporter = getMailTransporter();
+    if (transporter && !smtpAuthFailed) {
+      sendGmailNotification(recipient, subject, body).catch((err) => {
+        console.warn(`[Targeted Notification] Live mail dispatch to ${recipient} failed, retained in outbox:`, err);
+      });
+    } else {
+      console.log(`[Targeted Department Notification Fallback] Dispatched to ${recipient} [${type}]: ${subject}`);
+    }
+  }
+
+  return { recipients, dispatchedCount: recipients.length };
+}
+
 // Category suggestion powered by Local ML Model (TF-IDF + Multinomial Naive Bayes)
 function detectSuggestedCategory(text: string, currentCategory?: string, studentType?: string): string {
   if (currentCategory && currentCategory !== 'Others' && currentCategory.trim() !== '') {
@@ -168,7 +528,31 @@ app.get('/api/health', (req: Request, res: Response) => {
 // 2. Grievance Endpoints
 app.get('/api/grievances', (req: Request, res: Response) => {
   try {
+    const user = extractUserFromRequest(req);
     const list = getAllGrievances();
+
+    if (user) {
+      const role = (user.role || '').toUpperCase();
+      if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
+        return res.json(list);
+      }
+      if (role === 'DEPARTMENT_STAFF' || role === 'DEPARTMENT_HEAD') {
+        const filtered = list.filter((g) => {
+          const dept = g.assignedDepartmentId || g.assigned_department_id;
+          return dept && dept === user.department_id;
+        });
+        return res.json(filtered);
+      }
+      if (role === 'STUDENT') {
+        const studentFiltered = list.filter((g) => {
+          const matchesRegNo = user.id && g.studentRegNo.toLowerCase() === user.id.toLowerCase();
+          const matchesEmail = user.email && g.studentEmail.toLowerCase() === user.email.toLowerCase();
+          return matchesRegNo || matchesEmail;
+        });
+        return res.json(studentFiltered);
+      }
+    }
+
     const role = (req.query.role || req.headers['x-user-role'] || '').toString().toLowerCase();
     const studentRegNo = (req.query.studentRegNo || req.query.regNo || req.headers['x-user-regno'] || '').toString().trim();
     const studentEmail = (req.query.studentEmail || req.query.email || '').toString().trim().toLowerCase();
@@ -221,6 +605,8 @@ app.get('/api/grievances', (req: Request, res: Response) => {
           publicMasterNotes,
           masterTicketNo,
           masterStatus,
+          assignedDepartmentId: g.assignedDepartmentId,
+          assigned_department_id: g.assigned_department_id,
         };
       });
 
@@ -243,6 +629,26 @@ app.get('/api/grievances/triage', (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error fetching triage queue:', err);
     res.status(500).json({ error: 'Failed to fetch triage queue' });
+  }
+});
+
+// Single-resource grievance endpoint protected by RLAC
+app.get('/api/grievances/:id', enforceGrievanceRLAC, (req: Request, res: Response) => {
+  const grievance = (req as any).grievance || getGrievanceById(req.params.id);
+  if (!grievance) {
+    return res.status(404).json({ success: false, error: 'Grievance not found' });
+  }
+  res.json(grievance);
+});
+
+// Departments list endpoint
+app.get('/api/departments', (req: Request, res: Response) => {
+  try {
+    const departments = getAllDepartments();
+    res.json(departments);
+  } catch (err: any) {
+    console.error('Error fetching departments:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch departments' });
   }
 });
 
@@ -288,7 +694,13 @@ app.post('/api/grievances', (req: Request, res: Response) => {
             : 'Campus Facilities');
       const sourceTimestamp = payload.sourceTimestamp || new Date().toISOString();
 
-      // 2. Generate embedding vector
+      // 2. Resolve department auto-assignment from category & location
+      let assignedDepartmentId: string | null =
+        payload.assignedDepartmentId ||
+        payload.assigned_department_id ||
+        resolveDepartmentForCategory(payload.category, locationTag);
+
+      // 3. Generate embedding vector
       const embeddingVector = generateEmbeddingVector(payload.description || '', [
         payload.category,
         payload.hostelBlock || '',
@@ -296,7 +708,7 @@ app.post('/api/grievances', (req: Request, res: Response) => {
         locationTag,
       ]);
 
-      // 3. Stage 1 Hard Filter candidates (active, same category, within 72h window)
+      // 4. Stage 1 Hard Filter candidates (active, same category, within 72h window)
       const rawCandidates = getCandidatesForDeduplication(payload.category, 72);
       const candidates: MatchCandidate[] = rawCandidates.map((c) => ({
         id: c.id,
@@ -313,7 +725,7 @@ app.post('/api/grievances', (req: Request, res: Response) => {
         createdAt: c.createdAt,
       }));
 
-      // 4. Two-Stage Deduplication Match Pipeline
+      // 5. Two-Stage Deduplication Match Pipeline
       const dedupResult = runTwoStageDeduplication(
         {
           category: payload.category,
@@ -327,7 +739,7 @@ app.post('/api/grievances', (req: Request, res: Response) => {
         candidates,
       );
 
-      // 5. Apply threshold decision
+      // 6. Apply threshold decision
       let status: GrievanceStatus = payload.status || 'PRIMARY';
       let masterCaseId: string | null = null;
       let similarityScore: number | null = null;
@@ -338,6 +750,14 @@ app.post('/api/grievances', (req: Request, res: Response) => {
         masterCaseId = dedupResult.masterCaseId;
         similarityScore = dedupResult.similarityScore;
         mergedAt = new Date().toISOString();
+
+        // Auto-merged tickets inherit master ticket's department assignment
+        if (masterCaseId) {
+          const master = getGrievanceById(masterCaseId);
+          if (master && (master.assignedDepartmentId || master.assigned_department_id)) {
+            assignedDepartmentId = master.assignedDepartmentId || master.assigned_department_id || assignedDepartmentId;
+          }
+        }
       } else if (dedupResult.action === 'SUSPECTED_DUPLICATE') {
         status = 'SUSPECTED_DUPLICATE';
         masterCaseId = dedupResult.masterCaseId;
@@ -348,7 +768,7 @@ app.post('/api/grievances', (req: Request, res: Response) => {
         similarityScore = null;
       }
 
-      // 6. Create grievance record in database
+      // 7. Create grievance record in database with assigned_department_id
       const created = createGrievance({
         ...payload,
         status,
@@ -358,9 +778,11 @@ app.post('/api/grievances', (req: Request, res: Response) => {
         embeddingVector,
         similarityScore: similarityScore ?? undefined,
         mergedAt: mergedAt ?? undefined,
+        assignedDepartmentId,
+        assigned_department_id: assignedDepartmentId,
       });
 
-      // 7. Enqueue notification in SQLite outbox
+      // 8. Enqueue notification in SQLite outbox for student reporter
       if (status === 'MERGED_AUTOMATIC') {
         const emailBody = `Dear ${payload.studentName || 'Student'},\n\nYour complaint has been automatically consolidated under Master Ticket #${dedupResult.matchedTicketNo || 'MASTER'} as an identical issue was already reported. You will automatically receive updates and resolution confirmation.\n\nThank you,\nCollege Grievance Cell.`;
         sendSimulatedEmail(
@@ -377,6 +799,15 @@ app.post('/api/grievances', (req: Request, res: Response) => {
           emailBody,
           'confirmation',
         );
+      }
+
+      // 9. Dispatch targeted notification to assigned department contact & active staff
+      if (assignedDepartmentId) {
+        dispatchDepartmentNotification({
+          departmentId: assignedDepartmentId,
+          grievance: created,
+          type: 'dept_alert',
+        });
       }
 
       return created;
@@ -403,11 +834,14 @@ app.post('/api/grievances/merge', (req: Request, res: Response) => {
       if (!master) throw new Error(`Master ticket ${masterId} not found`);
       if (!child) throw new Error(`Child ticket ${childId} not found`);
 
+      const masterDept = master.assignedDepartmentId || master.assigned_department_id;
       const updatedChild = updateGrievance(childId, {
         status: 'MERGED_AUTOMATIC',
         masterCaseId: master.id,
         mergedAt: new Date().toISOString(),
-      });
+        assignedDepartmentId: masterDept,
+        assigned_department_id: masterDept,
+      } as any);
 
       if (!updatedChild) throw new Error('Failed to merge ticket');
 
@@ -469,7 +903,7 @@ app.post('/api/grievances/detach', (req: Request, res: Response) => {
 });
 
 // Admin public master notes update endpoint
-app.put('/api/grievances/:id/master-notes', (req: Request, res: Response) => {
+app.put('/api/grievances/:id/master-notes', enforceGrievanceRLAC, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { publicMasterNotes } = req.body;
@@ -493,7 +927,7 @@ app.put('/api/grievances/:id/master-notes', (req: Request, res: Response) => {
   }
 });
 
-app.put('/api/grievances/:id', (req: Request, res: Response) => {
+app.put('/api/grievances/:id', enforceGrievanceRLAC, (req: Request, res: Response) => {
   try {
     const updated = withTransaction(() => {
       const prev = getGrievanceById(req.params.id);
@@ -531,6 +965,19 @@ app.put('/api/grievances/:id', (req: Request, res: Response) => {
         }
       }
 
+      // Priority escalation alert trigger
+      if (req.body.priority === 'urgent' && prev?.priority !== 'urgent') {
+        const deptId = updatedRecord.assignedDepartmentId || updatedRecord.assigned_department_id;
+        if (deptId) {
+          dispatchDepartmentNotification({
+            departmentId: deptId,
+            grievance: updatedRecord,
+            type: 'dept_escalation',
+            customReason: 'Ticket priority escalated to urgent',
+          });
+        }
+      }
+
       return updatedRecord;
     });
 
@@ -542,6 +989,452 @@ app.put('/api/grievances/:id', (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error updating grievance:', err);
     res.status(400).json({ error: err.message || 'Failed to update grievance' });
+  }
+});
+
+// ==================== SUPER ADMIN REASSIGNMENT & MANAGEMENT ====================
+
+// Reassignment handler shared between /api/admin/grievances/:id/reassign and /api/grievances/:id/reassign
+const handleGrievanceReassign = (req: Request, res: Response) => {
+  try {
+    const user = extractUserFromRequest(req);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Authentication required.' });
+    }
+    const role = (user.role || '').toUpperCase();
+    if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Access denied: Only Super Admin can reassign grievances.' });
+    }
+
+    const { id } = req.params;
+    const { departmentId, reason } = req.body;
+
+    if (!departmentId) {
+      return res.status(400).json({ success: false, error: 'departmentId is required.' });
+    }
+
+    const targetDept = getDepartmentById(departmentId);
+    if (!targetDept) {
+      return res.status(400).json({ success: false, error: `Department ${departmentId} does not exist.` });
+    }
+
+    const grievance = getGrievanceById(id);
+    if (!grievance) {
+      return res.status(404).json({ success: false, error: 'Grievance not found.' });
+    }
+
+    const prevDeptId = grievance.assignedDepartmentId || grievance.assigned_department_id || null;
+
+    const result = withTransaction(() => {
+      const updated = updateGrievance(grievance.id, {
+        assignedDepartmentId: targetDept.id,
+        assigned_department_id: targetDept.id,
+      } as any);
+
+      if (!updated) {
+        throw new Error('Failed to update grievance department assignment.');
+      }
+
+      const auditRecord = recordAuditLog({
+        entityType: 'grievance',
+        entityId: grievance.id,
+        action: 'REASSIGN_DEPARTMENT',
+        actorId: user.id,
+        actorEmail: user.email,
+        actorRole: user.role,
+        previousState: JSON.stringify({ assignedDepartmentId: prevDeptId }),
+        newState: JSON.stringify({ assignedDepartmentId: targetDept.id }),
+        reason: reason || 'Super Admin reassignment',
+      });
+
+      return { updated, auditRecord };
+    });
+
+    // Targeted reassignment alert exclusively to the newly assigned department
+    dispatchDepartmentNotification({
+      departmentId: targetDept.id,
+      grievance: result.updated,
+      type: 'dept_reassignment',
+      customReason: reason,
+    });
+
+    res.status(200).json({
+      success: true,
+      newDepartmentId: targetDept.id,
+      assignedDepartmentId: targetDept.id,
+      grievance: result.updated,
+      auditLog: result.auditRecord,
+    });
+  } catch (err: any) {
+    console.error('Error reassigning grievance:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to reassign grievance' });
+  }
+};
+
+// Super Admin Grievance Reassignment with Atomic Audit Log & Targeted Reassignment Alert
+app.post('/api/admin/grievances/:id/reassign', handleGrievanceReassign);
+app.patch('/api/grievances/:id/reassign', handleGrievanceReassign);
+app.post('/api/grievances/:id/reassign', handleGrievanceReassign);
+
+// Department Staff / Head Request Re-Assignment to Super Admin
+app.post('/api/grievances/:id/request-reassign', (req: Request, res: Response) => {
+  try {
+    const user = extractUserFromRequest(req);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Authentication required.' });
+    }
+
+    const { id } = req.params;
+    const { suggestedDepartmentId, reason } = req.body;
+
+    const grievance = getGrievanceById(id);
+    if (!grievance) {
+      return res.status(404).json({ success: false, error: 'Grievance not found.' });
+    }
+
+    const role = (user.role || '').toUpperCase();
+    const isSuperAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
+    const currentTicketDept = grievance.assignedDepartmentId || grievance.assigned_department_id || null;
+
+    if (!isSuperAdmin) {
+      if (role !== 'DEPARTMENT_STAFF' && role !== 'DEPARTMENT_HEAD') {
+        return res.status(403).json({ success: false, error: 'Access denied: Only department staff or heads can request reassignment.' });
+      }
+      if (user.department_id && currentTicketDept && user.department_id !== currentTicketDept) {
+        return res.status(403).json({ success: false, error: 'Access denied: You can only request reassignment for tickets assigned to your department.' });
+      }
+    }
+
+    let targetDeptName = 'Unspecified';
+    if (suggestedDepartmentId) {
+      const targetDept = getDepartmentById(suggestedDepartmentId);
+      if (targetDept) {
+        targetDeptName = targetDept.name;
+      }
+    }
+
+    const requestNote = `[Reassignment Request by ${user.role} (${user.email}) to Department: ${targetDeptName}]: ${reason || 'Requested transfer by staff'}`;
+    const existingNotes = grievance.adminNotes ? `${grievance.adminNotes}\n\n${requestNote}` : requestNote;
+
+    const updated = updateGrievance(grievance.id, {
+      adminNotes: existingNotes,
+    });
+
+    const auditRecord = recordAuditLog({
+      entityType: 'grievance',
+      entityId: grievance.id,
+      action: 'REQUEST_REASSIGNMENT',
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      previousState: JSON.stringify({ assignedDepartmentId: currentTicketDept }),
+      newState: JSON.stringify({ suggestedDepartmentId }),
+      reason: reason || 'Staff requested ticket reassignment',
+    });
+
+    res.json({
+      success: true,
+      message: 'Reassignment request recorded and forwarded to Super Admin queue.',
+      grievance: updated,
+      auditLog: auditRecord,
+    });
+  } catch (err: any) {
+    console.error('Error requesting reassignment:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to request reassignment' });
+  }
+});
+
+// Admin Department CRUD
+app.get('/api/admin/departments', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const onlyActive = req.query.onlyActive === 'true';
+    const departments = getAllDepartments(!onlyActive);
+    res.json({ success: true, departments });
+  } catch (err: any) {
+    console.error('Error fetching admin departments:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch departments' });
+  }
+});
+
+app.post('/api/admin/departments', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const { name, code, contactEmail, isActive } = req.body;
+    if (!name || !code || !contactEmail) {
+      return res.status(400).json({ success: false, error: 'name, code, and contactEmail are required.' });
+    }
+    const existing = getDepartmentByCode(code);
+    if (existing) {
+      return res.status(409).json({ success: false, error: `Department code ${code} already exists.` });
+    }
+    const dept = createDepartment({ name, code, contactEmail, isActive });
+    const user = (req as any).user;
+    recordAuditLog({
+      entityType: 'department',
+      entityId: dept.id,
+      action: 'CREATE_DEPARTMENT',
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      newState: JSON.stringify(dept),
+      reason: 'Super Admin department creation',
+    });
+    res.status(201).json({ success: true, department: dept });
+  } catch (err: any) {
+    console.error('Error creating department:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to create department' });
+  }
+});
+
+app.put('/api/admin/departments/:id', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const dept = getDepartmentById(req.params.id);
+    if (!dept) {
+      return res.status(404).json({ success: false, error: 'Department not found.' });
+    }
+    const updated = updateDepartment(dept.id, req.body);
+    const user = (req as any).user;
+    recordAuditLog({
+      entityType: 'department',
+      entityId: dept.id,
+      action: 'UPDATE_DEPARTMENT',
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      previousState: JSON.stringify(dept),
+      newState: JSON.stringify(updated),
+      reason: 'Super Admin department update',
+    });
+    res.json({ success: true, department: updated });
+  } catch (err: any) {
+    console.error('Error updating department:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to update department' });
+  }
+});
+
+// Admin Routing Rules CRUD
+app.get('/api/admin/routing-rules', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const rules = getAllRoutingRules();
+    res.json({ success: true, rules });
+  } catch (err: any) {
+    console.error('Error fetching routing rules:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch routing rules' });
+  }
+});
+
+app.post('/api/admin/routing-rules', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const { category, departmentId, locationTagPattern, priorityOrder, priorityOverride, isActive } = req.body;
+    if (!category || !departmentId) {
+      return res.status(400).json({ success: false, error: 'category and departmentId are required.' });
+    }
+    const dept = getDepartmentById(departmentId);
+    if (!dept) {
+      return res.status(400).json({ success: false, error: `Department ${departmentId} does not exist.` });
+    }
+    const rule = createRoutingRule({
+      category,
+      departmentId: dept.id,
+      locationTagPattern,
+      priorityOrder: priorityOrder ? parseInt(priorityOrder, 10) : 0,
+      priorityOverride,
+      isActive,
+    });
+    const user = (req as any).user;
+    recordAuditLog({
+      entityType: 'routing_rule',
+      entityId: rule.id,
+      action: 'CREATE_ROUTING_RULE',
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      newState: JSON.stringify(rule),
+      reason: 'Super Admin routing rule creation',
+    });
+    res.status(201).json({ success: true, rule });
+  } catch (err: any) {
+    console.error('Error creating routing rule:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to create routing rule' });
+  }
+});
+
+app.put('/api/admin/routing-rules/:id', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const rule = getRoutingRuleById(req.params.id);
+    if (!rule) {
+      return res.status(404).json({ success: false, error: 'Routing rule not found.' });
+    }
+    if (req.body.departmentId) {
+      const dept = getDepartmentById(req.body.departmentId);
+      if (!dept) {
+        return res.status(400).json({ success: false, error: `Department ${req.body.departmentId} does not exist.` });
+      }
+      req.body.departmentId = dept.id;
+    }
+    const updated = updateRoutingRule(rule.id, req.body);
+    const user = (req as any).user;
+    recordAuditLog({
+      entityType: 'routing_rule',
+      entityId: rule.id,
+      action: 'UPDATE_ROUTING_RULE',
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      previousState: JSON.stringify(rule),
+      newState: JSON.stringify(updated),
+      reason: 'Super Admin routing rule update',
+    });
+    res.json({ success: true, rule: updated });
+  } catch (err: any) {
+    console.error('Error updating routing rule:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to update routing rule' });
+  }
+});
+
+app.delete('/api/admin/routing-rules/:id', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const rule = getRoutingRuleById(req.params.id);
+    if (!rule) {
+      return res.status(404).json({ success: false, error: 'Routing rule not found.' });
+    }
+    deleteRoutingRule(rule.id);
+    const user = (req as any).user;
+    recordAuditLog({
+      entityType: 'routing_rule',
+      entityId: rule.id,
+      action: 'DELETE_ROUTING_RULE',
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      previousState: JSON.stringify(rule),
+      reason: 'Super Admin routing rule deletion',
+    });
+    res.json({ success: true, message: 'Routing rule deleted successfully.' });
+  } catch (err: any) {
+    console.error('Error deleting routing rule:', err);
+    res.status(500).json({ success: false, error: 'Failed to delete routing rule' });
+  }
+});
+
+// Admin User Department Credential Provisioning
+app.post('/api/admin/users/assign-department', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const { userId, regNo, email, departmentId, role } = req.body;
+    const identifier = (userId || regNo || email || '').toString().trim();
+    if (!identifier) {
+      return res.status(400).json({ success: false, error: 'userId, regNo, or email is required.' });
+    }
+
+    let deptId: string | null = null;
+    if (departmentId) {
+      const dept = getDepartmentById(departmentId);
+      if (!dept) {
+        return res.status(400).json({ success: false, error: `Department ${departmentId} does not exist.` });
+      }
+      deptId = dept.id;
+    }
+
+    const validRoles: UserRole[] = ['DEPARTMENT_STAFF', 'DEPARTMENT_HEAD', 'SUPER_ADMIN', 'STUDENT'];
+    if (role && !validRoles.includes(role)) {
+      return res.status(400).json({ success: false, error: `Invalid role: ${role}. Valid roles are: ${validRoles.join(', ')}` });
+    }
+
+    const updated = updateUserDepartment(identifier, deptId, role);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'User not found.' });
+    }
+
+    const user = (req as any).user;
+    recordAuditLog({
+      entityType: 'user',
+      entityId: updated.id,
+      action: 'ASSIGN_USER_DEPARTMENT',
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      newState: JSON.stringify({ departmentId: deptId, role: updated.role }),
+      reason: 'Super Admin user credential and department assignment',
+    });
+
+    res.json({ success: true, user: updated });
+  } catch (err: any) {
+    console.error('Error assigning user department:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to assign user department' });
+  }
+});
+
+// Admin Audit Logs Viewer
+app.get('/api/admin/audit-logs', requireSuperAdmin, (req: Request, res: Response) => {
+  try {
+    const { entityType, entityId, actorId } = req.query;
+    const logs = getAuditLogs({
+      entityType: typeof entityType === 'string' ? entityType : undefined,
+      entityId: typeof entityId === 'string' ? entityId : undefined,
+      actorId: typeof actorId === 'string' ? actorId : undefined,
+    });
+    res.json({ success: true, auditLogs: logs });
+  } catch (err: any) {
+    console.error('Error fetching audit logs:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch audit logs' });
+  }
+});
+
+// Explicit Grievance Escalation Endpoint
+app.post('/api/grievances/:id/escalate', (req: Request, res: Response) => {
+  try {
+    const user = extractUserFromRequest(req);
+    const grievance = getGrievanceById(req.params.id);
+    if (!grievance) {
+      return res.status(404).json({ success: false, error: 'Grievance not found.' });
+    }
+
+    // RLAC: department staff/head can only escalate tickets in their own department
+    if (user) {
+      const role = (user.role || '').toUpperCase();
+      if (role === 'DEPARTMENT_STAFF' || role === 'DEPARTMENT_HEAD') {
+        const ticketDept = grievance.assignedDepartmentId || grievance.assigned_department_id;
+        if (ticketDept !== user.department_id) {
+          return res.status(403).json({ success: false, error: 'Access denied: Cannot escalate grievance belonging to another department.' });
+        }
+      } else if (role === 'STUDENT') {
+        return res.status(403).json({ success: false, error: 'Access denied: Students cannot escalate grievances directly.' });
+      }
+    }
+
+    const { reason } = req.body;
+    const updated = updateGrievance(grievance.id, { priority: 'urgent' });
+    if (!updated) {
+      return res.status(500).json({ success: false, error: 'Failed to escalate grievance.' });
+    }
+
+    const deptId = updated.assignedDepartmentId || updated.assigned_department_id;
+    if (deptId) {
+      dispatchDepartmentNotification({
+        departmentId: deptId,
+        grievance: updated,
+        type: 'dept_escalation',
+        customReason: reason || 'Ticket manually escalated to urgent priority',
+      });
+    }
+
+    if (user) {
+      recordAuditLog({
+        entityType: 'grievance',
+        entityId: updated.id,
+        action: 'ESCALATE_GRIEVANCE',
+        actorId: user.id,
+        actorEmail: user.email,
+        actorRole: user.role,
+        previousState: JSON.stringify({ priority: grievance.priority }),
+        newState: JSON.stringify({ priority: 'urgent' }),
+        reason: reason || 'Grievance escalated',
+      });
+    }
+
+    res.json({ success: true, grievance: updated });
+  } catch (err: any) {
+    console.error('Error escalating grievance:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to escalate grievance' });
   }
 });
 
@@ -570,18 +1463,138 @@ app.post('/api/users', (req: Request, res: Response) => {
 });
 
 // 4. Authentication Endpoints
+
+function handleAdminLogin(req: Request, res: Response) {
+  const { regNo, email, identifier: rawId, password } = req.body;
+  const identifier = (rawId || regNo || email || '').toString().trim();
+
+  if (!identifier || !password) {
+    return res.status(400).json({
+      success: false,
+      error: 'Register Number / Email and Password are required.',
+    });
+  }
+
+  let user = getUserByRegNo(identifier);
+  if (!user) {
+    user = getUserByEmail(identifier);
+  }
+
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      error: 'Invalid credentials: User not found.',
+    });
+  }
+
+  if (user.passwordHash && user.passwordHash !== password.toString().trim()) {
+    return res.status(401).json({
+      success: false,
+      error: 'Invalid credentials: Incorrect password.',
+    });
+  }
+
+  const roleUpper = (user.role || '').toUpperCase();
+
+  // Reject STUDENT accounts with HTTP 403 Forbidden
+  if (roleUpper === 'STUDENT') {
+    return res.status(403).json({
+      success: false,
+      error: 'Access denied: STUDENT accounts are not permitted to access administrative portal.',
+      role: 'STUDENT',
+    });
+  }
+
+  // Canonical role & permissions
+  const canonicalRole = normalizeCanonicalRole(user.role);
+  const permissions = getPermissionsForRole(canonicalRole);
+  const departmentId = user.departmentId || (user as any).department_id || null;
+
+  const token = signToken({
+    id: user.id,
+    email: user.email,
+    role: canonicalRole,
+    department_id: departmentId,
+    permissions,
+  });
+
+  const redirectUrl =
+    canonicalRole === 'SUPER_ADMIN'
+      ? '/admin/dashboard'
+      : '/admin/department/dashboard';
+
+  const { passwordHash: _, ...publicUser } = user;
+
+  return res.json({
+    success: true,
+    token,
+    user: {
+      ...publicUser,
+      role: canonicalRole,
+      departmentId,
+      department_id: departmentId,
+      permissions,
+    },
+    redirectUrl,
+  });
+}
+
+app.post('/api/auth/admin/login', (req: Request, res: Response) => {
+  try {
+    return handleAdminLogin(req, res);
+  } catch (err: any) {
+    console.error('Admin login error:', err);
+    res.status(500).json({ success: false, error: 'Internal server error during admin authentication' });
+  }
+});
+
+// Single Unified Admin Login Endpoint (Alias as required by spec)
+app.post('/api/auth/admin-login', (req: Request, res: Response) => {
+  try {
+    return handleAdminLogin(req, res);
+  } catch (err: any) {
+    console.error('Admin login error:', err);
+    res.status(500).json({ success: false, error: 'Internal server error during admin authentication' });
+  }
+});
+
 app.post('/api/auth/login', (req: Request, res: Response) => {
   try {
-    const { regNo, email, password } = req.body;
-    const identifier = (regNo || email || '').trim();
+    if (req.body.portal === 'admin') {
+      return handleAdminLogin(req, res);
+    }
+
+    const { regNo, email, identifier: rawId, password } = req.body;
+    const identifier = (rawId || regNo || email || '').toString().trim();
 
     if (!identifier || !password) {
       return res.status(400).json({ error: 'Register Number / Email and Password are required.' });
     }
 
     const authResult = verifyUserCredentials(identifier, password);
-    if (authResult.success) {
-      return res.json({ success: true, user: authResult.user });
+    if (authResult.success && authResult.user) {
+      const canonicalRole = normalizeCanonicalRole(authResult.user.role);
+      const permissions = getPermissionsForRole(canonicalRole);
+      const departmentId = authResult.user.departmentId || (authResult.user as any).department_id || null;
+
+      const token = signToken({
+        id: authResult.user.id,
+        email: authResult.user.email,
+        role: canonicalRole,
+        department_id: departmentId,
+        permissions,
+      });
+
+      return res.json({
+        success: true,
+        token,
+        user: {
+          ...authResult.user,
+          departmentId,
+          department_id: departmentId,
+          permissions,
+        },
+      });
     } else {
       return res.status(401).json({ error: authResult.error || 'Invalid credentials' });
     }

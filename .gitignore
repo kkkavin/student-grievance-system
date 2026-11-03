@@ -22,12 +22,14 @@ graphify-out/cost.json
 
 # Project report files
 *.pdf
+*.docx
 mini_project_report.html
 report_assets/
 extracted_images/
 anna_univ_logo.png
 sona_logo.png
 build_full_report.py
+build_docx_report.py
 create_svgs.py
 check_pages.py
 check_pdf.py

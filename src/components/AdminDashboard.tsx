@@ -44,7 +44,9 @@ import {
 import { ReportDownloader } from './ReportDownloader';
 import { PredictiveAnalyticsDashboard } from './PredictiveAnalyticsDashboard';
 import { TriageModerationView } from './TriageModerationView';
-import { fetchTriageQueueApi } from '../api';
+import { DepartmentManagement } from './DepartmentManagement';
+import { fetchTriageQueueApi, fetchDepartmentsApi, reassignGrievanceApi } from '../api';
+import { Department } from '../types';
 
 interface AdminDashboardProps {
   grievances: Grievance[];
@@ -57,7 +59,7 @@ const ITEMS_PER_PAGE = 8;
 
 export type VisualType = 'bar' | 'horizontal_bar' | 'pie' | 'donut' | 'ledger';
 export type VisualDimension = 'category' | 'status' | 'priority' | 'residency';
-export type ActiveViewSection = 'queue' | 'triage' | 'analytics';
+export type ActiveViewSection = 'queue' | 'triage' | 'analytics' | 'departments';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   grievances,
@@ -117,6 +119,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedComplaint, setSelectedComplaint] = useState<Grievance | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
+
+  // Department Management & Reassignment States
+  const [departmentsList, setDepartmentsList] = useState<Department[]>([]);
+  const [reassignDeptId, setReassignDeptId] = useState<string>('');
+  const [reassignReasonText, setReassignReasonText] = useState<string>('');
+  const [reassignSuccessMsg, setReassignSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDepartmentsApi()
+      .then(setDepartmentsList)
+      .catch(() => {});
+  }, []);
+
+  const handleReassignTicket = async (ticketId: string) => {
+    if (!reassignDeptId) return;
+    try {
+      setProcessingId(ticketId);
+      const res = await reassignGrievanceApi(ticketId, reassignDeptId, reassignReasonText || 'Super Admin reassignment');
+      setReassignSuccessMsg('Grievance successfully reassigned to target department.');
+      if (selectedComplaint && selectedComplaint.id === ticketId) {
+        setSelectedComplaint((prev) => (prev ? { ...prev, assignedDepartmentId: res.newDepartmentId } : null));
+      }
+      setTimeout(() => setReassignSuccessMsg(null), 4000);
+    } catch (err: any) {
+      alert(err.message || 'Failed to reassign ticket');
+    } finally {
+      setProcessingId(null);
+    }
+  };
 
   // ---------------------------------------------------------------------------
   // 2. Data Deduplication & Resilient Helpers
@@ -570,6 +601,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </span>
             )}
           </button>
+
+          {/* Tab 4: Department & RBAC Management */}
+          <button
+            id="toggle-view-departments"
+            type="button"
+            onClick={() => setActiveViewSection('departments')}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeViewSection === 'departments'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+            title="Super Admin Department-Level Access Control &amp; Routing Management"
+          >
+            <Building className="w-3.5 h-3.5" />
+            <span>Department Management</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono px-2">
@@ -579,6 +626,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ? 'All Tickets'
               : activeViewSection === 'triage'
               ? 'Triage Moderation'
+              : activeViewSection === 'departments'
+              ? 'Department Management'
               : 'Predictive Analytics & Risk'}
           </span>
         </div>
@@ -1280,7 +1329,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 5. DETAILED COMPLAINT MANAGEMENT & ACTION MODAL                           */}
+      {/* 5. DEPARTMENT MANAGEMENT CONSOLE (Rendered when 'departments' is active)   */}
+      {/* ========================================================================= */}
+      {activeViewSection === 'departments' && (
+        <DepartmentManagement />
+      )}
+
+      {/* ========================================================================= */}
+      {/* 6. DETAILED COMPLAINT MANAGEMENT & ACTION MODAL                           */}
       {/* ========================================================================= */}
       {selectedComplaint && (
         <div
@@ -1436,6 +1492,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   onChange={(e) => setResolutionNote(e.target.value)}
                   className="w-full p-3 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-2xl focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
                 />
+              </div>
+
+              {/* Department Reassignment (Super Admin) */}
+              <div className="p-4 bg-indigo-50/60 dark:bg-indigo-950/30 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                    <Building className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Assigned Department &amp; Reassignment</span>
+                  </label>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    Current:{' '}
+                    <strong className="text-indigo-600 dark:text-indigo-400">
+                      {departmentsList.find(
+                        (d) =>
+                          d.id ===
+                          (selectedComplaint.assignedDepartmentId ||
+                            (selectedComplaint as any).assigned_department_id)
+                      )?.name ||
+                        selectedComplaint.assignedDepartmentId ||
+                        'Unassigned'}
+                    </strong>
+                  </span>
+                </div>
+
+                {reassignSuccessMsg && (
+                  <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{reassignSuccessMsg}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select
+                    value={reassignDeptId}
+                    onChange={(e) => setReassignDeptId(e.target.value)}
+                    className="flex-1 text-xs p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none"
+                  >
+                    <option value="">-- Reassign to Department --</option>
+                    {departmentsList.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.code})
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="text"
+                    value={reassignReasonText}
+                    onChange={(e) => setReassignReasonText(e.target.value)}
+                    placeholder="Transfer justification..."
+                    className="flex-1 text-xs p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => handleReassignTicket(selectedComplaint.id)}
+                    disabled={!reassignDeptId || processingId === selectedComplaint.id}
+                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
+                  >
+                    Reassign
+                  </button>
+                </div>
               </div>
             </div>
 

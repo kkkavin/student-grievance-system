@@ -1,8 +1,24 @@
-export type UserRole = 'student' | 'admin';
+export type UserRole =
+  | 'STUDENT'
+  | 'DEPARTMENT_STAFF'
+  | 'DEPARTMENT_HEAD'
+  | 'SUPER_ADMIN'
+  | 'student'
+  | 'admin';
 
 export type StudentType = 'hosteller' | 'dayscholar';
 
-export type Department =
+export interface Department {
+  id: string;
+  name: string;
+  code: string;
+  contactEmail: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AcademicBranch =
   | 'CSE (Computer Science & Engineering)'
   | 'AIML (Artificial Intelligence & Machine Learning)'
   | 'CSD (Computer Science & Design)'
@@ -16,11 +32,51 @@ export type Department =
   | 'BME (Biomedical Engineering)'
   | 'CIVIL (Civil Engineering)';
 
+export interface CategoryRoutingRule {
+  id: string;
+  category: string;
+  departmentId: string;
+  locationTagPattern?: string | null;
+  priorityOrder?: number;
+  priorityOverride?: PriorityLevel;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  entityType: 'grievance' | 'department' | 'user' | string;
+  entityId: string;
+  actorId: string;
+  actorRole: string;
+  actorEmail?: string;
+  action: string;
+  previousState: string | null;
+  newState: string | null;
+  reason: string | null;
+  timestamp: string;
+  createdAt?: string;
+}
+
+export interface JWTPayload {
+  id: string;
+  email: string;
+  role: UserRole;
+  department_id: string | null;
+  permissions: string[];
+  iat?: number;
+  exp?: number;
+  iss?: string;
+}
+
 export interface UserProfile {
   id: string;
   regNo: string;
   name: string;
   department?: string;
+  departmentId?: string | null;
+  department_id?: string | null;
   gender: 'Male' | 'Female' | 'Other';
   studentType: StudentType;
   phone: string;
@@ -32,7 +88,7 @@ export interface UserProfile {
   createdAt: string;
 }
 
-export type PriorityLevel = 'urgent' | 'medium' | 'less_important';
+export type PriorityLevel = 'urgent' | 'high' | 'medium' | 'low' | 'less_important';
 
 export type GrievanceStatus =
   | 'pending'
@@ -77,6 +133,8 @@ export interface Grievance {
   publicMasterNotes?: string;
   masterTicketNo?: string;
   masterStatus?: string;
+  assignedDepartmentId?: string | null;
+  assigned_department_id?: string | null;
 }
 
 export interface IncidentMetadata {

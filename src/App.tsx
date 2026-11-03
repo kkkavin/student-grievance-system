@@ -24,9 +24,10 @@ import { DAYSCHOLAR_CATEGORIES } from './data/constants';
 import { AuthModal } from './components/AuthModal';
 import { StudentComplaintForm } from './components/StudentComplaintForm';
 import { AdminDashboard } from './components/AdminDashboard';
+import { DepartmentDashboard } from './components/DepartmentDashboard';
 import { FAQSection } from './components/FAQSection';
 import { ProfileModal } from './components/ProfileModal';
-import { fetchGrievances, updateGrievanceApi, saveUserApi } from './api';
+import { fetchGrievances, updateGrievanceApi, saveUserApi, clearAuthToken } from './api';
 
 export default function App() {
   // Current user state (persisted across page reloads via localStorage)
@@ -47,12 +48,33 @@ export default function App() {
     }
   }, [currentUser]);
 
+  const [currentPath, setCurrentPath] = useState<string>(() => {
+    return typeof window !== 'undefined' ? window.location.pathname : '/';
+  });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authInitialTab, setAuthInitialTab] = useState<'login' | 'signup' | 'admin'>('login');
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
   const [activeView, setActiveView] = useState<'home' | 'new_complaint'>('home');
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+
+  // Synchronize client-side URL routing
+  useEffect(() => {
+    const handleLocationChange = () => {
+      if (typeof window === 'undefined') return;
+      const path = window.location.pathname;
+      setCurrentPath(path);
+      if (path === '/admin/login') {
+        setAuthInitialTab('admin');
+        setIsAuthModalOpen(true);
+      }
+    };
+
+    handleLocationChange();
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
 
   // Dark Mode state
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -68,6 +90,11 @@ export default function App() {
       localStorage.setItem('theme', 'light');
     }
   }, [isDarkMode]);
+
+  // Derived user roles
+  const userRoleUpper = (currentUser?.role || '').toUpperCase();
+  const isSuperAdmin = userRoleUpper === 'SUPER_ADMIN' || userRoleUpper === 'ADMIN';
+  const isDepartmentStaff = userRoleUpper === 'DEPARTMENT_STAFF' || userRoleUpper === 'DEPARTMENT_HEAD';
 
   // Live complaints list
   const [grievances, setGrievances] = useState<Grievance[]>(() => {
@@ -87,7 +114,7 @@ export default function App() {
         return;
       }
 
-      if (currentUser.role === 'admin') {
+      if (isSuperAdmin || isDepartmentStaff) {
         const list = await fetchGrievances();
         if (Array.isArray(list)) {
           setGrievances(list);
@@ -227,8 +254,37 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('grievance_portal_user');
+    clearAuthToken();
+    if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+      window.history.pushState({}, '', '/');
+      setCurrentPath('/');
+    }
     setIsAuthModalOpen(true);
     setActiveView('home');
+  };
+
+  const handleLoginSuccess = (user: UserProfile, redirectUrl?: string) => {
+    setCurrentUser(user);
+    setIsAuthModalOpen(false);
+    setActiveView('home');
+
+    // Dynamic Role Routing
+    const roleUpper = (user.role || '').toUpperCase();
+    let targetPath = redirectUrl;
+    if (!targetPath) {
+      if (roleUpper === 'SUPER_ADMIN' || roleUpper === 'ADMIN') {
+        targetPath = '/admin/dashboard';
+      } else if (roleUpper === 'DEPARTMENT_STAFF' || roleUpper === 'DEPARTMENT_HEAD') {
+        targetPath = '/admin/department/dashboard';
+      } else {
+        targetPath = '/';
+      }
+    }
+
+    if (typeof window !== 'undefined' && targetPath) {
+      window.history.pushState({}, '', targetPath);
+      setCurrentPath(targetPath);
+    }
   };
 
   // Filter and reverse-chronologically sort complaints for current student
@@ -303,7 +359,13 @@ export default function App() {
                       {currentUser.name}
                     </div>
                     <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                      {currentUser.role === 'admin' ? 'Administrator' : currentUser.regNo}
+                      {isSuperAdmin
+                        ? 'Super Administrator'
+                        : isDepartmentStaff
+                        ? currentUser.role === 'DEPARTMENT_HEAD'
+                          ? 'Dept. Head'
+                          : 'Dept. Staff'
+                        : currentUser.regNo}
                     </div>
                   </div>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-1 shrink-0" />
@@ -396,8 +458,8 @@ export default function App() {
           />
         )}
 
-        {/* CASE 2: Admin Dashboard View */}
-        {activeView === 'home' && currentUser?.role === 'admin' && (
+        {/* CASE 2: Super Admin Dashboard View */}
+        {activeView === 'home' && isSuperAdmin && (
           <AdminDashboard
             grievances={grievances}
             onUpdatePriority={handleUpdatePriority}
@@ -406,8 +468,17 @@ export default function App() {
           />
         )}
 
-        {/* CASE 3: Student Perspective Homepage */}
-        {activeView === 'home' && currentUser?.role !== 'admin' && (
+        {/* CASE 3: Scoped Department Console View */}
+        {activeView === 'home' && isDepartmentStaff && (
+          <DepartmentDashboard
+            currentUser={currentUser!}
+            initialGrievances={grievances}
+            onLogout={handleLogout}
+          />
+        )}
+
+        {/* CASE 4: Student Perspective Homepage */}
+        {activeView === 'home' && !isSuperAdmin && !isDepartmentStaff && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
             {/* Student Hero Banner with Action Button */}
             <div className="relative overflow-hidden bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-3xl p-8 md:p-10 shadow-lg">
@@ -640,12 +711,9 @@ export default function App() {
       {/* ========================================================================= */}
       <AuthModal
         isOpen={isAuthModalOpen}
+        initialTab={authInitialTab}
         onClose={() => setIsAuthModalOpen(false)}
-        onSuccess={(user) => {
-          setCurrentUser(user);
-          setIsAuthModalOpen(false);
-          setActiveView('home');
-        }}
+        onSuccess={handleLoginSuccess}
       />
 
       {currentUser && (

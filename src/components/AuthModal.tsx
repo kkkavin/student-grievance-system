@@ -15,16 +15,28 @@ import {
 } from 'lucide-react';
 import { UserProfile, StudentType } from '../types';
 import { HOSTEL_BLOCKS, DEPARTMENT_OPTIONS } from '../data/constants';
-import { loginUserApi, registerUserApi } from '../api';
+import { loginUserApi, registerUserApi, adminLoginApi } from '../api';
 
 interface AuthModalProps {
   isOpen: boolean;
-  onSuccess: (user: UserProfile) => void;
+  onSuccess: (user: UserProfile, redirectUrl?: string) => void;
   onClose?: () => void;
+  initialTab?: 'login' | 'signup' | 'admin';
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'login' | 'signup' | 'admin'>('login');
+export const AuthModal: React.FC<AuthModalProps> = ({
+  isOpen,
+  onSuccess,
+  onClose,
+  initialTab = 'login',
+}) => {
+  const [activeTab, setActiveTab] = useState<'login' | 'signup' | 'admin'>(initialTab);
+
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Login state (blank by default for student login)
   const [loginRegNo, setLoginRegNo] = useState('');
@@ -70,15 +82,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
     }
   };
 
-  // Handle Admin login
+  // Handle Unified Admin / Department Staff login
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
     setLoading(true);
 
     try {
-      const user = await loginUserApi(adminEmail, adminPassword);
-      onSuccess(user);
+      const res = await adminLoginApi(adminEmail, adminPassword);
+      onSuccess(res.user, res.redirectUrl);
     } catch (err: any) {
       console.error('Admin login error:', err);
       setLoginError(err?.message || 'Invalid Admin credentials or unauthorized access.');
@@ -286,21 +298,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
               <div className="flex items-center gap-2 p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 rounded-xl text-xs text-indigo-900 dark:text-indigo-300">
                 <Shield className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
                 <span>
-                  Authorized personnel only. Please sign in with your administrative credentials.
+                  Unified administrative portal for Super Admin, Department Heads, and Staff. Authenticate to access your assigned queue.
                 </span>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Admin Email *
+                  Administrative Identifier (Email / Staff ID) *
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                   <input
                     id="admin-email-input"
-                    type="email"
+                    type="text"
                     required
-                    placeholder="admin@college.edu"
+                    placeholder="e.g. admin@college.edu or staff.network@college.edu"
                     value={adminEmail}
                     onChange={(e) => setAdminEmail(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
@@ -310,7 +322,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Admin Master Password *
+                  Password *
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
@@ -318,7 +330,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
                     id="admin-password-input"
                     type="password"
                     required
-                    placeholder="Enter admin password"
+                    placeholder="Enter password"
                     value={adminPassword}
                     onChange={(e) => setAdminPassword(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
@@ -339,7 +351,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onSuccess, onClose
                 disabled={loading}
                 className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
               >
-                {loading ? 'Authenticating Admin...' : 'Open Redressal Cell Control Panel'}
+                <span>{loading ? 'Authenticating...' : 'Sign In to Administrative Console'}</span>
                 <Shield className="w-4 h-4" />
               </button>
             </form>
