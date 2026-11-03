@@ -773,14 +773,17 @@ export default function App() {
       {/* ========================================================================= */}
       {/* 4. FOOTER */}
       {/* ========================================================================= */}
-      <footer className="border-t border-slate-200 bg-white py-6 mt-12 text-center text-xs text-slate-500">
+      <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-6 mt-12 text-center text-xs text-slate-500 dark:text-slate-400">
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
           <div className="flex items-center gap-2">
-            <GraduationCap className="w-4 h-4 text-blue-600" />
-            <span className="font-semibold text-slate-700">Student Grievance Redressal System</span>
+            <GraduationCap className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              Student Grievance Redressal System
+            </span>
           </div>
         </div>
       </footer>
+
     </div>
   );
 }

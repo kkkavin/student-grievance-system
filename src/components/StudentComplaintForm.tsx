@@ -87,43 +87,43 @@ function evaluateClarity(text: string): { label: string; tone: 'idle' | 'short' 
 // ---------------------------------------------------------------------------
 // Quick Prompt Starter Templates (Minimalist & Compact)
 // ---------------------------------------------------------------------------
-const PROMPT_TEMPLATES = [
-  {
-    id: 'water',
-    title: '💧 Water leak',
-    template: `Location: Hostel Block A, Room 204\nProblem: Continuous water leakage from washroom tap\nDuration: Started today morning\nUrgency: High`,
-  },
-  {
-    id: 'wifi',
-    title: '📶 Wi-Fi',
-    template: `Location: Block C 2nd Floor / Room 312\nProblem: Hostel Wi-Fi signal drops frequently and disconnects during study hours\nDevice: Laptop & Phone`,
-  },
-  {
-    id: 'electric',
-    title: '⚡ Power / Fan',
-    template: `Location: Classroom 402 / Hostel Room 118\nProblem: Ceiling fan making loud sparking noise and regulator is stuck\nUrgency: Urgent repair required`,
-  },
-  {
-    id: 'mess',
-    title: '🍱 Mess food',
-    template: `Location: Main Dining Hall (Counter 2)\nMeal Time: Lunch\nProblem: Food served cold and water dispenser is empty\nSuggested Fix: Refill drinking water and maintain food temperature`,
-  },
-  {
-    id: 'bus',
-    title: '🚌 Bus route',
-    template: `Route No: College Bus #14 (via Main Junction)\nProblem: Bus arrived 30 minutes late and was heavily overcrowded\nDate & Time: Morning 8:15 AM`,
-  },
-  {
-    id: 'lab',
-    title: '🔬 Lab PC',
-    template: `Location: Lab 3 (Systems Lab)\nProblem: System #24 monitor flickering and keyboard keys stuck\nImpact: Unable to run programming lab exercises`,
-  },
-  {
-    id: 'safety',
-    title: '🛡️ Safety report',
-    template: `Strictly Confidential Safety Notice:\nLocation: Near Campus Ground / Block B corridor\nDetails: Severe harassment incident observed\nUrgency: Immediate confidential action requested`,
-  },
-];
+// const PROMPT_TEMPLATES = [
+//   {
+//     id: 'water',
+//     title: '💧 Water leak',
+//     template: `Location: Hostel Block A, Room 204\nProblem: Continuous water leakage from washroom tap\nDuration: Started today morning\nUrgency: High`,
+//   },
+//   {
+//     id: 'wifi',
+//     title: '📶 Wi-Fi',
+//     template: `Location: Block C 2nd Floor / Room 312\nProblem: Hostel Wi-Fi signal drops frequently and disconnects during study hours\nDevice: Laptop & Phone`,
+//   },
+//   {
+//     id: 'electric',
+//     title: '⚡ Power / Fan',
+//     template: `Location: Classroom 402 / Hostel Room 118\nProblem: Ceiling fan making loud sparking noise and regulator is stuck\nUrgency: Urgent repair required`,
+//   },
+//   {
+//     id: 'mess',
+//     title: '🍱 Mess food',
+//     template: `Location: Main Dining Hall (Counter 2)\nMeal Time: Lunch\nProblem: Food served cold and water dispenser is empty\nSuggested Fix: Refill drinking water and maintain food temperature`,
+//   },
+//   {
+//     id: 'bus',
+//     title: '🚌 Bus route',
+//     template: `Route No: College Bus #14 (via Main Junction)\nProblem: Bus arrived 30 minutes late and was heavily overcrowded\nDate & Time: Morning 8:15 AM`,
+//   },
+//   {
+//     id: 'lab',
+//     title: '🔬 Lab PC',
+//     template: `Location: Lab 3 (Systems Lab)\nProblem: System #24 monitor flickering and keyboard keys stuck\nImpact: Unable to run programming lab exercises`,
+//   },
+//   {
+//     id: 'safety',
+//     title: '🛡️ Safety report',
+//     template: `Strictly Confidential Safety Notice:\nLocation: Near Campus Ground / Block B corridor\nDetails: Severe harassment incident observed\nUrgency: Immediate confidential action requested`,
+//   },
+// ];
 
 // ---------------------------------------------------------------------------
 // Inline Markdown Parser for Live Preview Tab
@@ -666,7 +666,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
       </div>
 
       {/* 3. Quick Starter Templates (Minimalist Chips - No Scrollbar, Fits Cleanly) */}
-      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+      {/* <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
         <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 inline-flex items-center gap-1 mr-1 select-none">
           <Sparkles className="w-3 h-3 text-blue-500" />
           <span>Starters:</span>
@@ -684,7 +684,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
             {tmpl.title}
           </button>
         ))}
-      </div>
+      </div> */}
 
       {/* Error Banner */}
       {errorMsg && (
