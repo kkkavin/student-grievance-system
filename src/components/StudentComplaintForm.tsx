@@ -861,7 +861,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
                   onFocus={() => setIsFocused(true)}
                   onBlur={() => setIsFocused(false)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Describe your issue with clarity... (e.g. location, specific problem, timing). Our AI engine classifies the category and assigns the redressal officer automatically."
+                  placeholder="Describe your grievance in detail... (e.g. location, specific problem, timing). Our AI engine classifies the category and assigns the redressal officer automatically."
                   className="ai-chatbot-textarea w-full p-2 text-sm sm:text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 resize-none font-sans leading-relaxed focus:outline-none transition-all"
                 />
               </div>

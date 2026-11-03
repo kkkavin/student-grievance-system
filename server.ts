@@ -1697,6 +1697,7 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
       ? `OTP code sent directly to ${email} via Gmail.`
       : `Verification code sent to ${email}.`,
     email,
+    otpCode: otp,
     sentViaGmail,
     sentEmail: sentSimulated,
   });
