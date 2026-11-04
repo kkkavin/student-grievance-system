@@ -564,7 +564,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* 1.5 ADMIN CONSOLE 3-WAY VIEW NAVIGATION                                  */}
       {/* ========================================================================= */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-x-auto scrollbar-none">
-        <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shrink-0 flex-wrap gap-1">
+        <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shrink-0 flex-wrap gap-1 overflow-x-auto scrollbar-none">
           {/* Tab 1: All Tickets / Grievance Management */}
           <button
             id="toggle-view-queue"
@@ -742,7 +742,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* Status Filter: strictly active, resolved, spam */}
           <div>
             <label className="block text-[10px] font-bold uppercase text-slate-400 dark:text-slate-500 mb-1">
-              Status
+              Filter by Status
             </label>
             <select
               value={statusFilter}
@@ -1414,7 +1414,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* Pagination Controls */}
             {totalPages > 1 && (
-              <div className="p-4 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+              <div className="p-4 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
                 <span className="text-slate-500 dark:text-slate-400">
                   Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, displayedComplaints.length)} of {displayedComplaints.length} tickets
                 </span>

@@ -905,7 +905,17 @@ app.post('/api/grievances/detach', (req: Request, res: Response) => {
 });
 
 // Admin public master notes update endpoint
-app.put('/api/grievances/:id/master-notes', enforceGrievanceRLAC, (req: Request, res: Response) => {
+app.put(
+  '/api/grievances/:id/master-notes',
+  (req: Request, res: Response, next: NextFunction) => {
+    const { publicMasterNotes } = req.body;
+    if (typeof publicMasterNotes !== 'string') {
+      return res.status(400).json({ error: 'publicMasterNotes string is required' });
+    }
+    next();
+  },
+  enforceGrievanceRLAC,
+  (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { publicMasterNotes } = req.body;
@@ -963,8 +973,8 @@ export function executeCascadingResolution(
     const finalPublicNotes =
       extraParentUpdates?.publicMasterNotes ||
       (extraParentUpdates as any)?.public_master_notes ||
-      trimmedNote ||
-      existing.publicMasterNotes;
+      existing.publicMasterNotes ||
+      trimmedNote;
 
     // 1. Update parent grievance
     const parentUpdates: Partial<Grievance> = {
@@ -1053,7 +1063,8 @@ export function executeCascadingResolution(
       );
     }
 
-    const childNoteSnippet = noteForEmail ? `Public Resolution Notes: ${noteForEmail}\n\n` : '';
+    const broadcastNotes = updatedParent.publicMasterNotes || noteForEmail;
+    const childNoteSnippet = broadcastNotes ? `Public Resolution Notes: ${broadcastNotes}\n\n` : '';
 
     for (const child of activeChildren) {
       if (child.studentEmail) {

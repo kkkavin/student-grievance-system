@@ -31,8 +31,12 @@ sona_logo.png
 build_full_report.py
 build_docx_report.py
 create_svgs.py
+create_advanced_modules_svgs.py
 check_pages.py
 check_pdf.py
 analyze_sheets.py
 verify_report.py
+linguistic_humanizer.py
+report_sections/
+__pycache__/
 .chrome_tmp/
