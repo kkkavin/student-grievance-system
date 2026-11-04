@@ -54,6 +54,7 @@ import {
   Department,
   CategoryRoutingRule,
   AuditLogEntry,
+  ResolveGrievanceResponse,
 } from './src/types.ts';
 
 dotenv.config();
@@ -232,8 +233,9 @@ export function enforceGrievanceRLAC(req: Request, res: Response, next: NextFunc
     }
     (req as any).user = user;
   } else {
-    // Single-resource GET strictly requires authentication
-    if (req.method === 'GET') {
+    // Single-resource GET and resolution endpoints strictly require authentication
+    const isResolution = req.path.endsWith('/resolve') || (req.baseUrl + req.path).endsWith('/resolve');
+    if (req.method === 'GET' || isResolution) {
       res.status(401).json({ success: false, error: 'Unauthorized: Authentication required.' });
       return;
     }
@@ -927,42 +929,276 @@ app.put('/api/grievances/:id/master-notes', enforceGrievanceRLAC, (req: Request,
   }
 });
 
+export interface CascadingResolutionResult {
+  parent: Grievance;
+  resolvedChildrenCount: number;
+  childIds: string[];
+}
+
+/**
+ * Shared service helper for atomic single-click cascading resolution:
+ * Resolves root parent grievance and all linked child complaints simultaneously within a single SQLite transaction,
+ * and fans out email notifications to parent and child reporters in the outbox.
+ */
+export function executeCascadingResolution(
+  parentGrievance: string | Grievance,
+  resolutionNote?: string,
+  childIds?: string[],
+  extraParentUpdates?: Partial<Grievance>,
+  actor?: { id: string; email?: string; role: string; department_id?: string | null }
+): CascadingResolutionResult | null {
+  const parentId = typeof parentGrievance === 'string' ? parentGrievance : parentGrievance.id;
+
+  return withTransaction(() => {
+    const existing = getGrievanceById(parentId);
+    if (!existing) return null;
+
+    // Check if parent was already resolved prior to this execution
+    const parentWasAlreadyResolved = existing.status === 'resolved';
+
+    const nowIso = new Date().toISOString();
+    const resolvedAt = existing.resolvedAt || nowIso;
+    const trimmedNote = (resolutionNote && typeof resolutionNote === 'string') ? resolutionNote.trim() : undefined;
+    const finalAdminNotes = extraParentUpdates?.adminNotes || trimmedNote || existing.adminNotes;
+    const finalPublicNotes =
+      extraParentUpdates?.publicMasterNotes ||
+      (extraParentUpdates as any)?.public_master_notes ||
+      trimmedNote ||
+      existing.publicMasterNotes;
+
+    // 1. Update parent grievance
+    const parentUpdates: Partial<Grievance> = {
+      ...(extraParentUpdates || {}),
+      status: 'resolved',
+      resolvedAt,
+      adminNotes: finalAdminNotes,
+      publicMasterNotes: finalPublicNotes,
+    };
+    const updatedParent = updateGrievance(parentId, parentUpdates);
+    if (!updatedParent) return null;
+
+    // 2. Query and link child tickets
+    const actorRole = (actor?.role || '').toUpperCase();
+    const isSuperAdmin = actorRole === 'SUPER_ADMIN' || actorRole === 'ADMIN';
+    const parentDept = existing.assignedDepartmentId || (existing as any).assigned_department_id;
+
+    const childrenMap = new Map<string, Grievance>();
+    const dbChildren = getChildGrievances(parentId);
+    for (const c of dbChildren) {
+      if (!isSuperAdmin) {
+        const cDept = c.assignedDepartmentId || (c as any).assigned_department_id;
+        if (!cDept || cDept !== parentDept) {
+          continue; // Defense in depth: skip foreign or unassigned linked tickets
+        }
+      }
+      childrenMap.set(c.id, c);
+    }
+
+    if (Array.isArray(childIds) && childIds.length > 0) {
+      for (const cid of childIds) {
+        if (cid && cid !== parentId && !childrenMap.has(cid)) {
+          const extraChild = getGrievanceById(cid);
+          if (extraChild) {
+            // RLAC Guard: Non-Super Admin cannot resolve or link cross-department children
+            if (!isSuperAdmin) {
+              const childDept = extraChild.assignedDepartmentId || (extraChild as any).assigned_department_id;
+              if (!childDept || childDept !== parentDept) {
+                continue; // Skip foreign department child (prevents IDOR)
+              }
+            }
+            childrenMap.set(cid, extraChild);
+          }
+        }
+      }
+    }
+
+    const allChildren = Array.from(childrenMap.values());
+    // Filter active/unresolved children for resolution and email fan-out
+    const activeChildren = allChildren.filter((c) => c.status !== 'resolved');
+    const updatedChildIds: string[] = [];
+
+    // 3. For each active child ticket, update status='resolved', resolvedAt, and link master_case_id
+    for (const child of activeChildren) {
+      updatedChildIds.push(child.id);
+      const childUpdates: Partial<Grievance> = {
+        status: 'resolved',
+        resolvedAt: child.resolvedAt || nowIso,
+      };
+      if (child.masterCaseId !== parentId && (child as any).master_case_id !== parentId) {
+        childUpdates.masterCaseId = parentId;
+      }
+      updateGrievance(child.id, childUpdates);
+    }
+
+    // Also link master_case_id for already-resolved children if not linked yet
+    for (const child of allChildren) {
+      if (child.status === 'resolved') {
+        const needsMasterLink = child.masterCaseId !== parentId && (child as any).master_case_id !== parentId;
+        if (needsMasterLink) {
+          updateGrievance(child.id, { masterCaseId: parentId });
+        }
+      }
+    }
+
+    // 4. Notification fan-out to parent and active child reporters (idempotent, zero duplicate spam)
+    const noteForEmail = trimmedNote || updatedParent.publicMasterNotes || updatedParent.adminNotes || '';
+    const parentNoteSnippet = noteForEmail ? `Notes: ${noteForEmail}\n\n` : '';
+
+    if (!parentWasAlreadyResolved && updatedParent.studentEmail) {
+      sendSimulatedEmail(
+        updatedParent.studentEmail,
+        `Grievance Resolved - Ticket #${updatedParent.ticketNo}`,
+        `Dear ${updatedParent.studentName || 'Student'},\n\nYour grievance (Ticket #${updatedParent.ticketNo}, Category: ${updatedParent.category}) has been resolved.\n\n${parentNoteSnippet}Thank you for your patience.`,
+        'resolution',
+      );
+    }
+
+    const childNoteSnippet = noteForEmail ? `Public Resolution Notes: ${noteForEmail}\n\n` : '';
+
+    for (const child of activeChildren) {
+      if (child.studentEmail) {
+        sendSimulatedEmail(
+          child.studentEmail,
+          `Grievance Resolved - Master Case #${updatedParent.ticketNo}`,
+          `Dear ${child.studentName || 'Student'},\n\nThe master issue (Case #${updatedParent.ticketNo}, Category: ${updatedParent.category}) linked to your ticket #${child.ticketNo} has been marked as resolved.\n\n${childNoteSnippet}Thank you,\nCollege Grievance Redressal Team.`,
+          'resolution',
+        );
+      }
+    }
+
+    // 5. Audit Log Entry
+    if (actor && actor.id) {
+      try {
+        recordAuditLog({
+          entityType: 'grievance',
+          entityId: parentId,
+          action: 'RESOLVE_CASCADING',
+          actorId: actor.id,
+          actorEmail: actor.email,
+          actorRole: actor.role,
+          previousState: JSON.stringify({ status: existing.status }),
+          newState: JSON.stringify({
+            status: 'resolved',
+            resolvedChildrenCount: updatedChildIds.length,
+            childIds: updatedChildIds,
+          }),
+          reason: trimmedNote || 'Single-click cascading resolution',
+        });
+      } catch (err) {
+        console.error('Audit log error in cascading resolution:', err);
+      }
+    }
+
+    return {
+      parent: updatedParent,
+      resolvedChildrenCount: updatedChildIds.length,
+      childIds: updatedChildIds,
+    };
+  });
+}
+
+// Single-click cascading resolution endpoint
+app.post(
+  '/api/grievances/:id/resolve',
+  authenticateJWT,
+  enforceGrievanceRLAC,
+  (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { resolutionNote, adminNotes, childIds } = req.body || {};
+      const noteToApply = resolutionNote || adminNotes;
+      const user = (req as any).user;
+      const actor = user
+        ? {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            department_id: user.department_id ?? user.departmentId ?? null,
+          }
+        : undefined;
+
+      const result = executeCascadingResolution(
+        id,
+        noteToApply,
+        childIds,
+        undefined,
+        actor
+      );
+
+      if (!result || !result.parent) {
+        return res.status(404).json({ success: false, error: 'Grievance not found' });
+      }
+
+      return res.json({
+        success: true,
+        parent: result.parent,
+        resolvedChildrenCount: result.resolvedChildrenCount,
+        childIds: result.childIds,
+      });
+    } catch (err: any) {
+      console.error('Error resolving grievance cascade:', err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'Cascading resolution failed',
+      });
+    }
+  }
+);
+
 app.put('/api/grievances/:id', enforceGrievanceRLAC, (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    const actor = user
+      ? {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          department_id: user.department_id ?? user.departmentId ?? null,
+        }
+      : undefined;
+
+    // Delegate to executeCascadingResolution when status is updated to 'resolved'
+    if (req.body && req.body.status === 'resolved') {
+      const prev = getGrievanceById(req.params.id);
+      if (!prev) {
+        return res.status(404).json({ error: 'Grievance not found' });
+      }
+
+      const noteToApply = req.body.resolutionNote || req.body.adminNotes || req.body.publicMasterNotes || (req.body as any).public_master_notes;
+      const result = executeCascadingResolution(
+        req.params.id,
+        noteToApply,
+        req.body.childIds,
+        req.body,
+        actor
+      );
+
+      if (!result || !result.parent) {
+        return res.status(404).json({ error: 'Grievance not found' });
+      }
+
+      // Priority escalation alert trigger
+      if (req.body.priority === 'urgent' && prev?.priority !== 'urgent') {
+        const deptId = result.parent.assignedDepartmentId || (result.parent as any).assigned_department_id;
+        if (deptId) {
+          dispatchDepartmentNotification({
+            departmentId: deptId,
+            grievance: result.parent,
+            type: 'dept_escalation',
+            customReason: 'Ticket priority escalated to urgent',
+          });
+        }
+      }
+
+      return res.json(result.parent);
+    }
+
+    // Non-resolved status updates
     const updated = withTransaction(() => {
       const prev = getGrievanceById(req.params.id);
       const updatedRecord = updateGrievance(req.params.id, req.body);
       if (!updatedRecord) {
         return null;
-      }
-
-      // Master ticket resolution broadcast fan-out
-      if (req.body.status === 'resolved' || (updatedRecord.status === 'resolved' && prev?.status !== 'resolved')) {
-        // 1. Notify master ticket reporter
-        sendSimulatedEmail(
-          updatedRecord.studentEmail,
-          `Grievance Resolved - Ticket #${updatedRecord.ticketNo}`,
-          `Dear ${updatedRecord.studentName},\n\nYour grievance (Ticket #${updatedRecord.ticketNo}, Category: ${updatedRecord.category}) has been resolved.\n\n${updatedRecord.publicMasterNotes || updatedRecord.adminNotes ? 'Notes: ' + (updatedRecord.publicMasterNotes || updatedRecord.adminNotes) + '\n\n' : ''}Thank you for your patience.`,
-          'resolution',
-        );
-
-        // 2. Broadcast resolution to all subscribed child ticket reporters
-        const children = getChildGrievances(updatedRecord.id);
-        for (const child of children) {
-          if (child.status !== 'resolved') {
-            updateGrievance(child.id, {
-              status: 'resolved',
-              resolvedAt: new Date().toISOString(),
-            });
-          }
-
-          sendSimulatedEmail(
-            child.studentEmail,
-            `Grievance Resolved - Master Case #${updatedRecord.ticketNo}`,
-            `Dear ${child.studentName},\n\nThe master issue (Case #${updatedRecord.ticketNo}, Category: ${updatedRecord.category}) linked to your ticket #${child.ticketNo} has been marked as resolved.\n\n${updatedRecord.publicMasterNotes || updatedRecord.adminNotes ? 'Public Resolution Notes: ' + (updatedRecord.publicMasterNotes || updatedRecord.adminNotes) + '\n\n' : ''}Thank you,\nCollege Grievance Redressal Team.`,
-            'resolution',
-          );
-        }
       }
 
       // Priority escalation alert trigger

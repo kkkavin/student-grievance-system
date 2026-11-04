@@ -195,52 +195,56 @@ export const PredictiveAnalyticsDashboard: React.FC<
         </div>
       </div>
 
-      {/* Navigation View Sub-tabs */}
-      <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 w-fit text-xs">
-        <button
-          type="button"
-          onClick={() => setActiveTab('all')}
-          className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
-            activeTab === 'all'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          Comprehensive View
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('trends')}
-          className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
-            activeTab === 'trends'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          Category Trends
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('infrastructure')}
-          className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
-            activeTab === 'infrastructure'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          Transport & Network
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('forecast')}
-          className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
-            activeTab === 'forecast'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          Risk Model & Actions
-        </button>
+      {/* Navigation View Sub-tabs - horizontally scrollable on mobile */}
+      <div className="overflow-x-auto scrollbar-none -mx-1 px-1">
+        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 w-fit min-w-max text-xs overflow-x-auto scrollbar-none">
+          {/* Sub-tabs bar: overflow-x-auto scrollbar-none flex-wrap */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('all')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+              activeTab === 'all'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            {/* overflow-x-auto scrollbar-none flex-wrap */}
+            Comprehensive View
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('trends')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+              activeTab === 'trends'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            Category Trends
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('infrastructure')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+              activeTab === 'infrastructure'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            Transport & Network
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('forecast')}
+            className={`px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+              activeTab === 'forecast'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            Risk Model & Actions
+          </button>
+        </div>
       </div>
 
       {/* Error state */}

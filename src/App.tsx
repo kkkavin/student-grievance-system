@@ -27,7 +27,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { DepartmentDashboard } from './components/DepartmentDashboard';
 import { FAQSection } from './components/FAQSection';
 import { ProfileModal } from './components/ProfileModal';
-import { fetchGrievances, updateGrievanceApi, saveUserApi, clearAuthToken } from './api';
+import { fetchGrievances, updateGrievanceApi, resolveGrievanceCascadeApi, saveUserApi, clearAuthToken } from './api';
 
 export default function App() {
   // Current user state (persisted across page reloads via localStorage)
@@ -184,26 +184,38 @@ export default function App() {
     const resolvedAt = new Date().toISOString();
     const adminNotes = customResolutionNote || 'Resolved by administration.';
 
-    const updatedTicket: Grievance = {
-      ...target,
-      status: 'resolved',
-      resolvedAt,
-      adminNotes,
-    };
-
+    // Optimistically resolve parent and all linked child complaints simultaneously
     setGrievances((prev) =>
-      prev.map((g) => (g.id === id ? updatedTicket : g))
+      prev.map((g) =>
+        g.id === id || g.masterCaseId === id || (target.ticketNo && g.masterTicketNo === target.ticketNo)
+          ? { ...g, status: 'resolved', resolvedAt, adminNotes }
+          : g
+      )
     );
 
-    // Update database
+    // Call cascading resolution endpoint
     try {
-      await updateGrievanceApi(id, {
-        status: 'resolved',
-        resolvedAt,
-        adminNotes,
-      });
+      const res = await resolveGrievanceCascadeApi(id, adminNotes);
+      if (res && Array.isArray(res.childIds) && res.childIds.length > 0) {
+        setGrievances((prev) =>
+          prev.map((g) =>
+            res.childIds.includes(g.id)
+              ? { ...g, status: 'resolved', resolvedAt, adminNotes }
+              : g
+          )
+        );
+      }
     } catch (err) {
-      console.warn('Mark done update fallback:', err);
+      console.warn('Cascading resolution fallback to single update:', err);
+      try {
+        await updateGrievanceApi(id, {
+          status: 'resolved',
+          resolvedAt,
+          adminNotes,
+        });
+      } catch (fallbackErr) {
+        console.warn('Mark done update fallback error:', fallbackErr);
+      }
     }
 
     // Trigger automated resolution notification
@@ -299,27 +311,27 @@ export default function App() {
     });
 
   return (
-    <div className="min-h-screen bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-blue-100 dark:selection:bg-blue-900 selection:text-blue-900 dark:selection:text-blue-100 transition-colors">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50/50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-blue-100 dark:selection:bg-blue-900 selection:text-blue-900 dark:selection:text-blue-100 transition-colors">
       {/* ========================================================================= */}
       {/* 1. HEADER SECTION (Student Grievance name top-left, Profile UI top-right) */}
       {/* ========================================================================= */}
       <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs transition-colors">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2">
           {/* Top Left: Student Grievance Brand */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
               id="brand-logo-btn"
               onClick={() => setActiveView('home')}
-              className="flex items-center gap-2.5 text-left group cursor-pointer"
+              className="flex items-center gap-2 sm:gap-2.5 text-left group cursor-pointer min-h-[44px] min-w-0"
             >
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-700 to-indigo-800 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
-                <GraduationCap className="w-6 h-6" />
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-blue-700 to-indigo-800 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform shrink-0">
+                <GraduationCap className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
-              <div>
-                <span className="font-bold text-base sm:text-lg tracking-tight text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors block leading-tight">
+              <div className="min-w-0">
+                <span className="font-bold text-sm sm:text-base md:text-lg tracking-tight text-slate-900 dark:text-white group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors block leading-tight truncate">
                   Student Grievance System
                 </span>
-                <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 block">
+                <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400 block truncate max-w-[130px] min-[400px]:max-w-[180px] sm:max-w-none">
                   AI-Powered College Redressal Cell
                 </span>
               </div>
@@ -327,12 +339,12 @@ export default function App() {
           </div>
 
           {/* Top Right: Dark Mode Toggle + Profile UI / Login Controls */}
-          <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {/* DARK MODE TOGGLE BUTTON */}
             <button
               id="dark-mode-toggle-btn"
               onClick={() => setIsDarkMode(!isDarkMode)}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-700"
+              className="min-w-[44px] min-h-[44px] p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-700 flex items-center justify-center shrink-0"
               title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
               {isDarkMode ? (
@@ -349,9 +361,9 @@ export default function App() {
                 <button
                   id="user-profile-dropdown-btn"
                   onClick={() => setIsUserDropdownOpen(!isUserDropdownOpen)}
-                  className="flex items-center gap-2 pl-2.5 pr-3 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl transition-all cursor-pointer shadow-2xs"
+                  className="flex items-center gap-1.5 sm:gap-2 pl-2 sm:pl-2.5 pr-2.5 sm:pr-3 py-1.5 sm:py-1 min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl transition-all cursor-pointer shadow-2xs"
                 >
-                  <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
+                  <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
                     {currentUser.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="hidden sm:block text-left text-xs">
@@ -368,7 +380,7 @@ export default function App() {
                         : currentUser.regNo}
                     </div>
                   </div>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-1 shrink-0" />
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-0.5 sm:ml-1 shrink-0" />
                 </button>
 
                 {/* Profile Dropdown Dialogue Box */}
@@ -378,7 +390,7 @@ export default function App() {
                       className="fixed inset-0 z-40"
                       onClick={() => setIsUserDropdownOpen(false)}
                     />
-                    <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50">
+                    <div className="absolute right-0 mt-2 w-56 sm:w-52 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50">
                       <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800">
                         <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{currentUser.name}</p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{currentUser.email}</p>
@@ -390,9 +402,9 @@ export default function App() {
                           setIsUserDropdownOpen(false);
                           setIsProfileModalOpen(true);
                         }}
-                        className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
+                        className="w-full text-left px-4 py-3 sm:py-2.5 min-h-[44px] sm:min-h-0 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2.5 transition-colors cursor-pointer"
                       >
-                        <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <User className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                         <span>Profile</span>
                       </button>
 
@@ -402,9 +414,9 @@ export default function App() {
                           setIsUserDropdownOpen(false);
                           setIsLogoutConfirmOpen(true);
                         }}
-                        className="w-full text-left px-4 py-2.5 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-2.5 transition-colors cursor-pointer border-t border-slate-100 dark:border-slate-800"
+                        className="w-full text-left px-4 py-3 sm:py-2.5 min-h-[44px] sm:min-h-0 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-2.5 transition-colors cursor-pointer border-t border-slate-100 dark:border-slate-800"
                       >
-                        <LogOut className="w-4 h-4" />
+                        <LogOut className="w-4 h-4 shrink-0" />
                         <span>Logout</span>
                       </button>
                     </div>
@@ -415,7 +427,7 @@ export default function App() {
               <button
                 id="header-login-btn"
                 onClick={() => setIsAuthModalOpen(true)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                className="min-h-[44px] px-2.5 sm:px-4 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] sm:text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer whitespace-nowrap inline-flex items-center justify-center shrink-0"
               >
                 Login / Sign Up
               </button>
@@ -428,16 +440,17 @@ export default function App() {
       {successBanner && (
         <div
           id="system-success-banner"
-          className="bg-emerald-600 text-white py-3 px-4 shadow-sm transition-all"
+          className="bg-emerald-600 text-white py-3 px-3 sm:px-4 shadow-sm transition-all"
         >
           <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 text-xs font-medium">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>{successBanner}</span>
+              <span className="truncate sm:overflow-visible sm:whitespace-normal">{successBanner}</span>
             </div>
             <button
               onClick={() => setSuccessBanner(null)}
-              className="text-white/80 hover:text-white font-bold p-1 cursor-pointer"
+              className="text-white/80 hover:text-white font-bold p-2 sm:p-1 min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer shrink-0"
+              aria-label="Dismiss banner"
             >
               ✕
             </button>
@@ -479,18 +492,18 @@ export default function App() {
 
         {/* CASE 4: Student Perspective Homepage */}
         {activeView === 'home' && !isSuperAdmin && !isDepartmentStaff && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 py-6 sm:py-8 space-y-8 sm:space-y-10">
             {/* Student Hero Banner with Action Button */}
-            <div className="relative overflow-hidden bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-3xl p-8 md:p-10 shadow-lg">
-              <div className="relative z-10 max-w-2xl space-y-4">
-                <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-xs font-medium text-blue-200 border border-white/10">
-                  <Sparkles className="w-3.5 h-3.5 text-blue-300" />
-                  <span>College Grievance Redressal & Anti-Ragging Portal</span>
+            <div className="relative overflow-hidden bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-2xl sm:rounded-3xl p-5 sm:p-8 md:p-10 shadow-lg">
+              <div className="relative z-10 max-w-2xl space-y-3.5 sm:space-y-4">
+                <div className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[11px] sm:text-xs font-medium text-blue-200 border border-white/10 max-w-full">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-300 shrink-0" />
+                  <span className="truncate">College Grievance Redressal & Anti-Ragging Portal</span>
                 </div>
-                <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight leading-tight">
+                <h1 className="text-xl sm:text-3xl md:text-4xl font-extrabold tracking-tight leading-tight">
                   Have a problem on campus or in your hostel?
                 </h1>
-                <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
+                <p className="text-xs sm:text-sm md:text-base text-slate-300 leading-relaxed">
                   Lodge complaints regarding hostel damages, water leakage, Wi-Fi, mess food, bus routes, or any college trouble. Our automated local triage prioritizes authentic issues directly with management.
                 </p>
 
@@ -505,11 +518,11 @@ export default function App() {
                         setActiveView('new_complaint');
                       }
                     }}
-                    className="relative group px-6 py-3.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600 hover:from-blue-400 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-sm rounded-2xl shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 transition-all flex items-center gap-2.5 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
+                    className="relative group w-full sm:w-auto min-h-[44px] justify-center px-6 py-3.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600 hover:from-blue-400 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-sm rounded-2xl shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 transition-all flex items-center gap-2.5 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
                   >
-                    <PlusCircle className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
+                    <PlusCircle className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300 shrink-0" />
                     <span>Lodge Complaint</span>
-                    <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-white/20 text-white/95">
+                    <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-white/20 text-white/95 shrink-0">
                       AI Triage
                     </span>
                   </button>
@@ -526,7 +539,7 @@ export default function App() {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                     Your Lodged Grievances
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -534,7 +547,7 @@ export default function App() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2 sm:gap-2.5">
                   <button
                     onClick={() => {
                       if (!currentUser) {
@@ -543,20 +556,20 @@ export default function App() {
                         setActiveView('new_complaint');
                       }
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
                   >
-                    <PlusCircle className="w-3.5 h-3.5" />
+                    <PlusCircle className="w-3.5 h-3.5 shrink-0" />
                     <span>New Complaint</span>
                   </button>
 
-                  <span className="text-xs font-mono font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-1.5 rounded-xl border border-blue-100 dark:border-blue-900">
+                  <span className="text-xs font-mono font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-2 sm:py-1.5 rounded-xl border border-blue-100 dark:border-blue-900 shrink-0">
                     {studentGrievances.length} Registered
                   </span>
                 </div>
               </div>
 
               {studentGrievances.length === 0 ? (
-                <div className="p-8 text-center bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl space-y-4 shadow-xs">
+                <div className="p-6 sm:p-8 text-center bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl sm:rounded-3xl space-y-4 shadow-xs">
                   <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
                     <Inbox className="w-6 h-6" />
                   </div>
@@ -574,14 +587,14 @@ export default function App() {
                         setActiveView('new_complaint');
                       }
                     }}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
+                    className="w-full sm:w-auto min-h-[44px] justify-center inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-all cursor-pointer"
                   >
                     <PlusCircle className="w-4 h-4" />
                     <span>Lodge First Grievance</span>
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
                   {studentGrievances.map((item) => {
                     const isMerged =
                       Boolean(item.masterTicketNo) ||
@@ -593,11 +606,11 @@ export default function App() {
                       <div
                         key={item.id}
                         id={`student-ticket-card-${item.id}`}
-                        className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 hover:shadow-md transition-all space-y-3.5 flex flex-col justify-between"
+                        className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-800 hover:shadow-md transition-all space-y-3.5 flex flex-col justify-between"
                       >
                         <div className="space-y-2.5">
                           {/* Header Row: Ticket No & Status Pill */}
-                          <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
                               {item.ticketNo}
                             </span>
@@ -737,8 +750,8 @@ export default function App() {
 
       {/* Logout Confirmation Dialogue Box */}
       {isLogoutConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 max-w-sm w-full p-6 text-center space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 max-w-sm w-full p-5 sm:p-6 text-center space-y-4 my-auto">
             <div className="w-12 h-12 bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 rounded-full flex items-center justify-center mx-auto">
               <LogOut className="w-6 h-6" />
             </div>
@@ -750,7 +763,7 @@ export default function App() {
               <button
                 id="cancel-logout-modal-btn"
                 onClick={() => setIsLogoutConfirmOpen(false)}
-                className="flex-1 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+                className="flex-1 min-h-[44px] py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
               >
                 Cancel
               </button>
@@ -760,7 +773,7 @@ export default function App() {
                   setIsLogoutConfirmOpen(false);
                   handleLogout();
                 }}
-                className="flex-1 py-2.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors cursor-pointer shadow-xs"
+                className="flex-1 min-h-[44px] py-2.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors cursor-pointer shadow-xs flex items-center justify-center"
               >
                 Yes, Log Out
               </button>

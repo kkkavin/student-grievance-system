@@ -23,6 +23,8 @@ import {
   MessageSquare,
   X,
   ChevronDown,
+  GitMerge,
+  Layers,
 } from 'lucide-react';
 import { Grievance, UserProfile, PriorityLevel, GrievanceStatus, Department } from '../types';
 import {
@@ -31,7 +33,9 @@ import {
   escalateGrievanceApi,
   fetchDepartmentsApi,
   fetchGrievances,
+  resolveGrievanceCascadeApi,
 } from '../api';
+import { groupSemanticGrievances, GroupedSemanticGrievance } from '../ml/deduplication';
 
 interface DepartmentDashboardProps {
   currentUser: UserProfile;
@@ -58,6 +62,19 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
   const [resolutionNote, setResolutionNote] = useState('');
   const [adminNoteDraft, setAdminNoteDraft] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
+
+  const toggleGroupExpanded = (parentId: string) => {
+    setExpandedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) {
+        next.delete(parentId);
+      } else {
+        next.add(parentId);
+      }
+      return next;
+    });
+  };
 
   // Reassignment Request Modal
   const [isReassignModalOpen, setIsReassignModalOpen] = useState(false);
@@ -145,15 +162,43 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
     });
   }, [grievances, statusFilter, priorityFilter, searchQuery]);
 
+  // Group complaints with identical semantic meaning under single parent issue
+  const groupedGrievances = useMemo(() => {
+    return groupSemanticGrievances(filteredGrievances);
+  }, [filteredGrievances]);
+
   // ---------------------------------------------------------------------------
   // Action Handlers
   // ---------------------------------------------------------------------------
   const handleUpdateStatus = async (id: string, newStatus: GrievanceStatus, customNote?: string) => {
     try {
       setActionLoading(true);
+      if (newStatus === 'resolved') {
+        const note = customNote || resolutionNote || adminNoteDraft || undefined;
+        const res = await resolveGrievanceCascadeApi(id, note);
+        const resolvedAt = res.parent?.resolvedAt || new Date().toISOString();
+        setGrievances((prev) =>
+          prev.map((g) =>
+            g.id === id || g.masterCaseId === id || res.childIds?.includes(g.id)
+              ? { ...g, status: 'resolved', resolvedAt, adminNotes: note || g.adminNotes }
+              : g
+          )
+        );
+        if (selectedTicket?.id === id) {
+          setSelectedTicket((prev) =>
+            prev ? { ...prev, status: 'resolved', resolvedAt, adminNotes: note || prev.adminNotes } : null
+          );
+        }
+        showBanner(
+          'success',
+          `Grievance and ${res.resolvedChildrenCount || 0} grouped complaint(s) resolved successfully.`
+        );
+        return;
+      }
+
       const updates: Partial<Grievance> = {
         status: newStatus,
-        resolvedAt: newStatus === 'resolved' ? new Date().toISOString() : undefined,
+        resolvedAt: undefined,
       };
       if (customNote) {
         updates.adminNotes = customNote;
@@ -395,7 +440,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
       {/* ===================================================================== */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[640px] text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">
               <tr>
                 <th className="px-5 py-3.5">Ticket #</th>
@@ -407,76 +452,187 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-              {filteredGrievances.map((item) => (
-                <tr
-                  key={item.id}
-                  className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
-                >
-                  <td className="px-5 py-4 font-mono font-bold text-slate-900 dark:text-white">
-                    {item.ticketNo || item.id}
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="font-bold text-slate-900 dark:text-white">{item.studentName}</div>
-                    <div className="text-[11px] text-slate-400 font-mono">{item.studentRegNo}</div>
-                  </td>
-                  <td className="px-5 py-4 max-w-md">
-                    <div className="font-bold text-blue-700 dark:text-blue-400 mb-0.5">
-                      {item.category}
-                    </div>
-                    <p className="text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed">
-                      {item.description}
-                    </p>
-                  </td>
-                  <td className="px-5 py-4">
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-md font-bold text-[10px] uppercase ${
-                        item.priority === 'urgent'
-                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
-                          : item.priority === 'high'
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                      }`}
+              {groupedGrievances.map((group) => {
+                const item = group.parent;
+                const isGrouped = group.totalCount > 1;
+                const isExpanded = expandedGroupIds.has(item.id);
+
+                return (
+                  <React.Fragment key={item.id}>
+                    <tr
+                      id={`dept-ticket-row-${item.id}`}
+                      data-testid={`dept-ticket-row-${item.id}`}
+                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
                     >
-                      {item.priority || 'medium'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4">
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                        item.status === 'resolved'
-                          ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/40'
-                          : item.status === 'in_progress'
-                          ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/40'
-                          : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/40'
-                      }`}
-                    >
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          item.status === 'resolved'
-                            ? 'bg-emerald-500'
-                            : item.status === 'in_progress'
-                            ? 'bg-blue-500'
-                            : 'bg-amber-500'
-                        }`}
-                      />
-                      {item.status.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-right">
-                    <button
-                      onClick={() => {
-                        setSelectedTicket(item);
-                        setResolutionNote(item.adminNotes || '');
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Review</span>
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {filteredGrievances.length === 0 && (
+                      <td className="px-5 py-4 font-mono font-bold text-slate-900 dark:text-white">
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          <span>{item.ticketNo || item.id}</span>
+                          {isGrouped && (
+                            <span
+                              data-testid={`dept-merged-badge-${item.id}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                              title="Grouped duplicate complaints under this parent"
+                            >
+                              <GitMerge className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                              <span>Merged ({group.totalCount})</span>
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="font-bold text-slate-900 dark:text-white">{item.studentName}</div>
+                        <div className="text-[11px] text-slate-400 font-mono">{item.studentRegNo}</div>
+                      </td>
+                      <td className="px-5 py-4 max-w-md">
+                        <div className="font-bold text-blue-700 dark:text-blue-400 mb-0.5">
+                          {item.category}
+                        </div>
+                        <p className="text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed">
+                          {item.description}
+                        </p>
+                        {isGrouped && (
+                          <button
+                            type="button"
+                            id={`dept-toggle-group-${item.id}`}
+                            data-testid={`dept-toggle-group-${item.id}`}
+                            onClick={() => toggleGroupExpanded(item.id)}
+                            className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold hover:underline flex items-center gap-1 mt-1 cursor-pointer"
+                          >
+                            <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            <span>{isExpanded ? 'Hide' : 'View'} {group.children.length} merged complaint{group.children.length > 1 ? 's' : ''}</span>
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded-md font-bold text-[10px] uppercase ${
+                            item.priority === 'urgent'
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                              : item.priority === 'high'
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {item.priority || 'medium'}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                            item.status === 'resolved'
+                              ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/40'
+                              : item.status === 'in_progress'
+                              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/40'
+                              : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/40'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              item.status === 'resolved'
+                                ? 'bg-emerald-500'
+                                : item.status === 'in_progress'
+                                ? 'bg-blue-500'
+                                : 'bg-amber-500'
+                            }`}
+                          />
+                          {item.status.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            id={`dept-review-btn-${item.id}`}
+                            data-testid={`dept-review-btn-${item.id}`}
+                            onClick={() => {
+                              setSelectedTicket(item);
+                              setResolutionNote(item.adminNotes || '');
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Review</span>
+                          </button>
+                          {item.status !== 'resolved' && (
+                            <button
+                              id={`dept-quick-resolve-btn-${item.id}`}
+                              data-testid={`dept-quick-resolve-btn-${item.id}`}
+                              onClick={() => handleUpdateStatus(item.id, 'resolved')}
+                              disabled={actionLoading}
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold inline-flex items-center gap-1 cursor-pointer text-xs disabled:opacity-60 transition-colors shadow-2xs"
+                              title={isGrouped ? `Resolve parent and ${group.children.length} grouped child tickets` : 'Resolve ticket'}
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Resolve{isGrouped ? ` All (${group.totalCount})` : ''}</span>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* Expandable Grouped Child Complaints Row */}
+                    {isGrouped && isExpanded && (
+                      <tr key={`dept-child-row-${item.id}`} className="bg-slate-50/70 dark:bg-slate-800/40">
+                        <td colSpan={6} className="px-5 py-3 border-t border-slate-100 dark:border-slate-800">
+                          <div className="space-y-2">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                              <span className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-400">
+                                <Layers className="w-3.5 h-3.5" />
+                                <span>Underlying Grouped Complaints ({group.children.length})</span>
+                              </span>
+                              {group.matchScore !== undefined && (
+                                <span className="font-mono text-slate-400">
+                                  Match Score: {(group.matchScore * 100).toFixed(0)}%
+                                </span>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 gap-2">
+                              {group.children.map((child) => (
+                                <div
+                                  key={child.id}
+                                  id={`dept-child-ticket-${child.id}`}
+                                  data-testid={`dept-child-ticket-${child.id}`}
+                                  onClick={() => {
+                                    setSelectedTicket(child);
+                                    setResolutionNote(child.adminNotes || '');
+                                  }}
+                                  className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-600 cursor-pointer flex items-center justify-between gap-3 text-xs shadow-2xs transition-colors"
+                                >
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded text-[11px]">
+                                      #{child.ticketNo}
+                                    </span>
+                                    <span className="font-medium text-slate-800 dark:text-slate-200">
+                                      {child.studentName} ({child.studentRegNo})
+                                    </span>
+                                    <span className="text-slate-500 text-[11px] line-clamp-1 max-w-md">
+                                      {child.description}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0 text-[10px]">
+                                    <span className="text-slate-400">
+                                      {new Date(child.createdAt).toLocaleDateString()}
+                                    </span>
+                                    <span
+                                      className={`px-2 py-0.5 rounded font-bold uppercase ${
+                                        child.status === 'resolved'
+                                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                          : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                                      }`}
+                                    >
+                                      {child.status}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              {groupedGrievances.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
                     No grievances in this department queue matching the selected filters.
@@ -493,7 +649,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
       {/* ===================================================================== */}
       {selectedTicket && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-2xl w-full p-6 sm:p-8 shadow-2xl space-y-6 my-8">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-2xl w-full p-6 sm:p-8 shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
               <div>
                 <span className="font-mono text-xs font-bold text-blue-600 dark:text-blue-400">
@@ -554,6 +710,56 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
               </div>
             </div>
 
+            {/* Grouped / Merged Complaints in Modal */}
+            {(() => {
+              const selectedGroup = groupedGrievances.find((g) => g.parent.id === selectedTicket.id);
+              if (selectedGroup && selectedGroup.children.length > 0) {
+                return (
+                  <div className="p-4 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                        <GitMerge className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span>Grouped / Merged Complaints ({selectedGroup.children.length})</span>
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Cascading resolution will resolve all {selectedGroup.totalCount} complaints
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {selectedGroup.children.map((child) => (
+                        <div
+                          key={child.id}
+                          className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-[11px] font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+                              #{child.ticketNo}
+                            </span>
+                            <span className="font-medium text-slate-800 dark:text-slate-200">
+                              {child.studentName} ({child.studentRegNo})
+                            </span>
+                            <span className="text-slate-500 text-[11px] line-clamp-1 max-w-sm">
+                              {child.description}
+                            </span>
+                          </div>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              child.status === 'resolved'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                            }`}
+                          >
+                            {child.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
             {/* Existing Internal Notes */}
             {selectedTicket.adminNotes && (
               <div className="space-y-1.5">
@@ -590,7 +796,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
 
             {/* Department Actions Toolbar */}
             <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 {/* Request Re-assignment from Super Admin */}
                 <button
                   onClick={() => setIsReassignModalOpen(true)}
@@ -613,12 +819,12 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
               </div>
 
               {/* Status Transitions */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 {selectedTicket.status !== 'in_progress' && selectedTicket.status !== 'resolved' && (
                   <button
                     onClick={() => handleUpdateStatus(selectedTicket.id, 'in_progress')}
                     disabled={actionLoading}
-                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer text-center"
                   >
                     Mark In Progress
                   </button>
@@ -628,7 +834,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                   <button
                     onClick={() => handleUpdateStatus(selectedTicket.id, 'resolved')}
                     disabled={actionLoading}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <Check className="w-3.5 h-3.5" />
                     <span>Resolve Grievance</span>
@@ -637,7 +843,7 @@ export const DepartmentDashboard: React.FC<DepartmentDashboardProps> = ({
                   <button
                     onClick={() => handleUpdateStatus(selectedTicket.id, 'in_progress')}
                     disabled={actionLoading}
-                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer"
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer text-center"
                   >
                     Reopen Ticket
                   </button>

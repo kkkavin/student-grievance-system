@@ -334,7 +334,7 @@ export const DepartmentManagement: React.FC = () => {
 
       {/* Sub-Tabs Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+        <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-x-auto scrollbar-none max-w-full">
           <button
             onClick={() => setSubTab('departments')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
@@ -356,6 +356,7 @@ export const DepartmentManagement: React.FC = () => {
             }`}
           >
             <GitBranch className="w-4 h-4" />
+            {/* overflow-x-auto scrollbar-none flex-wrap */}
             <span>Auto-Routing Rules ({rules.length})</span>
           </button>
 

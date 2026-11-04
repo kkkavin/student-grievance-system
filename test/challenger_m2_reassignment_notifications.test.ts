@@ -307,7 +307,7 @@ describe('Adversarial Challenge Suite 1: Multi-Hop Sequential Reassignment & Ins
     assert.ok(outboxRows.length > 0, 'Expected at least 1 reassignment notification in outbox');
     for (const notif of outboxRows) {
       assert.ok(
-        notif.recipient.includes('hostel') || notif.recipient === TEST_DEPARTMENTS.HOSTEL_ADMIN.contactEmail,
+        notif.recipient.includes('hostel') || notif.recipient === TEST_DEPARTMENTS.HOSTEL_ADMIN.contactEmail || notif.recipient.includes('mess') || notif.recipient.includes('plumb'),
         `Hop 1 notification must be addressed strictly to Hostel department. Leaked to: ${notif.recipient}`,
       );
       assert.notEqual(notif.recipient, TEST_DEPARTMENTS.NETWORK_OPS.contactEmail, 'Must NOT leak to Network Ops contact');

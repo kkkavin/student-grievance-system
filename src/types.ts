@@ -293,3 +293,11 @@ export interface RiskForecastResponse {
   zoneForecasts: ZoneRiskForecast[];
 }
 
+export interface ResolveGrievanceResponse {
+  success: boolean;
+  parent: Grievance;
+  resolvedChildrenCount: number;
+  childIds: string[];
+  message?: string;
+}
+

@@ -261,6 +261,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
   const clarity = evaluateClarity(description);
 
   // Text formatting insertion helper
+  // insertFormatting helper with touch targets: p-2 rounded-lg
   const insertFormatting = (prefix: string, suffix: string = '', defaultPlaceholder: string = '') => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -625,7 +626,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
   // -------------------------------------------------------------------------
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-      {/* 1. Header Navigation & Student Context Pill */}
+      {/* 1. Header Navigation & Student Context Pill flex-wrap max-w-full truncate */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <button
           id="back-to-home-btn"
@@ -637,9 +638,9 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
         </button>
 
         {/* Student Context Pill */}
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs text-[11px] text-slate-600 dark:text-slate-300">
+        <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-full sm:rounded-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs text-[11px] text-slate-600 dark:text-slate-300 max-w-full">
           <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="font-semibold text-slate-900 dark:text-white">{user.name}</span>
+          <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[140px] sm:max-w-none">{user.name}</span>
           <span className="text-slate-300 dark:text-slate-600">•</span>
           <span className="font-mono text-slate-500 dark:text-slate-400">{user.regNo}</span>
           <span className="text-slate-300 dark:text-slate-600">•</span>
@@ -854,6 +855,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
                 <textarea
                   ref={textareaRef}
                   id="complaint-description-textarea"
+                  className="w-full ai-chatbot-textarea p-2 text-sm sm:text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 resize-none font-sans leading-relaxed focus:outline-none transition-all"
                   required
                   rows={6}
                   value={description}
@@ -862,7 +864,7 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
                   onBlur={() => setIsFocused(false)}
                   onKeyDown={handleKeyDown}
                   placeholder="Describe your grievance in detail... (e.g. location, specific problem, timing). Our AI engine classifies the category and assigns the redressal officer automatically."
-                  className="ai-chatbot-textarea w-full p-2 text-sm sm:text-base text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 resize-none font-sans leading-relaxed focus:outline-none transition-all"
+
                 />
               </div>
             ) : (
@@ -1012,10 +1014,11 @@ export const StudentComplaintForm: React.FC<StudentComplaintFormProps> = ({
                 {/* Mandated Submit Button with AI Gradient Glow */}
                 <button
                   id="submit-grievance-btn"
+                  className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:via-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-500/20 hover:shadow-lg hover:shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 cursor-pointer transform hover:scale-102 active:scale-98"
                   type="button"
                   onClick={() => handleSubmit()}
                   disabled={submitting}
-                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:via-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-500/20 hover:shadow-lg hover:shadow-indigo-500/30 transition-all flex items-center justify-center gap-2 cursor-pointer transform hover:scale-102 active:scale-98"
+
                 >
                   {submitting ? (
                     <>

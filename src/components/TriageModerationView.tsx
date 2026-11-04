@@ -334,7 +334,7 @@ export const TriageModerationView: React.FC<TriageModerationViewProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900 font-semibold text-amber-800 dark:text-amber-300">
             {triageItems.length} Suspected Duplicate{triageItems.length === 1 ? '' : 's'} Pending
           </span>
@@ -547,7 +547,7 @@ export const TriageModerationView: React.FC<TriageModerationViewProps> = ({
                                 type="button"
                                 disabled={isProcessing || !master.id}
                                 onClick={() => handleMerge(master.id, child.id, child.ticketNo)}
-                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                                className="flex-wrap items-stretch px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
                                 title={master.id ? "Merge into Master Case" : "Cannot merge: no candidate master identified"}
                               >
                                 {isProcessing ? (
@@ -580,10 +580,10 @@ export const TriageModerationView: React.FC<TriageModerationViewProps> = ({
             if (e.target === e.currentTarget) setInspectingItem(null);
           }}
         >
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-4xl w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-4xl w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
                   <Sparkles className="w-4 h-4" />
                 </div>
@@ -683,7 +683,7 @@ export const TriageModerationView: React.FC<TriageModerationViewProps> = ({
             </div>
 
             {/* Modal Actions */}
-            <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setInspectingItem(null)}
@@ -692,7 +692,7 @@ export const TriageModerationView: React.FC<TriageModerationViewProps> = ({
                 Cancel & Close
               </button>
 
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5">
                 <button
                   type="button"
                   disabled={processingId === inspectingItem.id}

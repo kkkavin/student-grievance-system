@@ -8,9 +8,10 @@ import {
   IncidentMetadata,
   MatchCandidate,
   DeduplicationResult,
+  Grievance,
 } from '../types.ts';
 
-export type { IncidentMetadata, MatchCandidate, DeduplicationResult };
+export type { IncidentMetadata, MatchCandidate, DeduplicationResult, Grievance };
 
 // ---------------------------------------------------------------------------
 // 1. Domain Constants & Vocabulary
@@ -917,3 +918,277 @@ export function runTwoStageDeduplication(
     matchedTicketNo: bestCandidate.ticketNo,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 5. Semantic Grievance Grouping
+// ---------------------------------------------------------------------------
+
+export interface GroupedSemanticGrievance {
+  parent: Grievance;
+  children: Grievance[];
+  totalCount: number;
+  matchScore?: number;
+}
+
+export interface SemanticGroupingOptions {
+  similarityThreshold?: number;
+  windowHours?: number;
+  checkCategory?: boolean;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export type GroupingOptions = SemanticGroupingOptions;
+
+/**
+ * Clusters a collection of grievances with identical semantic meaning (s >= 0.92)
+ * under a single parent issue.
+ *
+ * Guarantees:
+ * 1. Chronological parent priority: Earliest submitted grievance (createdAt ASC -> ticketNo ASC -> id ASC)
+ *    is unconditionally elected as the root parent (masterCaseId: null).
+ * 2. Star topology: Duplicates are attached directly to the root parent (masterCaseId: parent.id),
+ *    preventing transitive semantic drift.
+ * 3. Standalone preservation: Grievances matching no cluster have children: [] and totalCount: 1.
+ * 4. Partition conservation: Sum of totalCount across all groups strictly equals the number of valid input grievances.
+ * 5. Permutation invariance: Cluster formation and parent election are independent of input array ordering.
+ */
+export function groupSemanticGrievances(
+  grievances: Grievance[],
+  options?: SemanticGroupingOptions,
+): GroupedSemanticGrievance[] {
+  if (!grievances || !Array.isArray(grievances) || grievances.length === 0) {
+    return [];
+  }
+
+  // Filter out any null or non-object values safely
+  const validGrievances = grievances.filter(
+    (g): g is Grievance => g !== null && typeof g === 'object',
+  );
+
+  if (validGrievances.length === 0) {
+    return [];
+  }
+
+  const threshold =
+    options?.similarityThreshold !== undefined
+      ? options.similarityThreshold
+      : AUTO_MERGE_THRESHOLD;
+  const windowHours =
+    options?.windowHours !== undefined ? options.windowHours : 72;
+  const checkCategory =
+    options?.checkCategory !== undefined ? options.checkCategory : true;
+  const sortOrder = options?.sortOrder || 'asc';
+  const maxWindowMs = windowHours > 0 ? windowHours * 60 * 60 * 1000 : 0;
+
+  // Safe timestamp parser
+  const getTime = (isoDate?: string): number => {
+    if (!isoDate) return NaN;
+    const t = new Date(isoDate).getTime();
+    return isNaN(t) ? NaN : t;
+  };
+
+  // Canonical comparator enforcing total order (createdAt ASC -> ticketNo ASC -> id ASC)
+  const compareGrievanceCanonical = (a: Grievance, b: Grievance): number => {
+    const tA = getTime(a.createdAt);
+    const tB = getTime(b.createdAt);
+    const validA = !isNaN(tA);
+    const validB = !isNaN(tB);
+
+    if (validA && validB) {
+      if (tA !== tB) return tA - tB;
+    } else if (validA && !validB) {
+      return -1;
+    } else if (!validA && validB) {
+      return 1;
+    }
+
+    const ticketCmp = (a.ticketNo || '').localeCompare(b.ticketNo || '');
+    if (ticketCmp !== 0) return ticketCmp;
+
+    return (a.id || '').localeCompare(b.id || '');
+  };
+
+  if (validGrievances.length === 1) {
+    const solo = validGrievances[0];
+    return [
+      {
+        parent: {
+          ...solo,
+          masterCaseId: null,
+        },
+        children: [],
+        totalCount: 1,
+        matchScore: undefined,
+      },
+    ];
+  }
+
+  // 1. Canonical sort (createdAt ASC) ensures earliest submitted grievance is root parent
+  const sorted = [...validGrievances].sort(compareGrievanceCanonical);
+
+  // 2. Pre-compute and cache 256-d embedding vectors
+  const vectorCache = new Map<string, number[]>();
+
+  const getEmbedding = (g: Grievance): number[] => {
+    const key = g.id || g.ticketNo || `${g.category}_${g.createdAt}_${g.description}`;
+    let cached = vectorCache.get(key);
+    if (cached) return cached;
+
+    if (g.embeddingVector && g.embeddingVector.length === VECTOR_DIMENSION) {
+      cached = g.embeddingVector;
+    } else {
+      cached = generateEmbeddingVector(g.description || '', [
+        g.category || '',
+        g.hostelBlock || '',
+        g.roomNo || '',
+        g.locationTag || '',
+      ]);
+    }
+    vectorCache.set(key, cached);
+    return cached;
+  };
+
+  // Pre-fill vector cache for all grievances
+  for (const g of sorted) {
+    getEmbedding(g);
+  }
+
+  // 3. Sequential clustering with leader linkage (star topology)
+  interface Cluster {
+    parent: Grievance;
+    children: Grievance[];
+    scores: number[];
+  }
+
+  const clusters: Cluster[] = [];
+
+  for (const candidate of sorted) {
+    const candVec = getEmbedding(candidate);
+    const candTime = getTime(candidate.createdAt);
+    const candCat = (candidate.category || '').trim().toLowerCase();
+
+    let bestClusterIdx = -1;
+    let highestScore = -1;
+
+    for (let i = 0; i < clusters.length; i++) {
+      const leader = clusters[i].parent;
+      const leaderTime = getTime(leader.createdAt);
+
+      // Check 1: Explicit DB masterCaseId link
+      const isExplicitChildOfLeader = Boolean(
+        candidate.masterCaseId &&
+        (candidate.masterCaseId === leader.id ||
+          candidate.masterCaseId === leader.ticketNo ||
+          clusters[i].children.some((c) => c.id === candidate.masterCaseId || c.ticketNo === candidate.masterCaseId))
+      );
+
+      if (isExplicitChildOfLeader) {
+        bestClusterIdx = i;
+        highestScore = candidate.similarityScore || 1.0;
+        break;
+      }
+
+      // If candidate already has an explicit DB master pointing to another ticket, skip this leader
+      if (candidate.masterCaseId && leader.masterCaseId && candidate.masterCaseId === leader.masterCaseId) {
+        bestClusterIdx = i;
+        highestScore = candidate.similarityScore || 1.0;
+        break;
+      }
+      if (candidate.masterCaseId && candidate.masterCaseId !== leader.id) {
+        continue;
+      }
+
+      // Check 2: Status compatibility (prevent open ticket ingestion into closed resolved parent)
+      if (leader.status === 'resolved' && candidate.status !== 'resolved') {
+        continue;
+      }
+
+      // Check 3: Stage 1 Hard Filters
+      // Category match
+      if (checkCategory) {
+        const leaderCat = (leader.category || '').trim().toLowerCase();
+        if (candCat !== leaderCat) {
+          continue;
+        }
+      }
+
+      // Rolling time window
+      if (maxWindowMs > 0 && !isNaN(candTime) && !isNaN(leaderTime)) {
+        if (Math.abs(candTime - leaderTime) > maxWindowMs) {
+          continue;
+        }
+      }
+
+      // Location adjacency
+      const leaderForAdjacency: any = {
+        ...leader,
+        hostelBlock: leader.hostelBlock || leader.locationTag,
+      };
+      if (!checkLocationAdjacency(candidate as any, leaderForAdjacency)) {
+        continue;
+      }
+
+      // Check 4: Stage 2 Cosine Similarity against Leader
+      const leaderVec = getEmbedding(leader);
+      const sim = computeCosineSimilarity(candVec, leaderVec);
+
+      if (sim >= threshold && sim > highestScore) {
+        highestScore = sim;
+        bestClusterIdx = i;
+      }
+    }
+
+    if (bestClusterIdx !== -1) {
+      const targetCluster = clusters[bestClusterIdx];
+      const childObj: Grievance = {
+        ...candidate,
+        masterCaseId: targetCluster.parent.id,
+        masterTicketNo: targetCluster.parent.ticketNo || candidate.masterTicketNo,
+        similarityScore: candidate.similarityScore ?? (highestScore > 0 ? Number(highestScore.toFixed(4)) : undefined),
+      };
+      targetCluster.children.push(childObj);
+      if (highestScore > 0) {
+        targetCluster.scores.push(highestScore);
+      }
+    } else {
+      const parentObj: Grievance = {
+        ...candidate,
+        masterCaseId: null,
+      };
+      clusters.push({
+        parent: parentObj,
+        children: [],
+        scores: [],
+      });
+    }
+  }
+
+  // 4. Assemble GroupedSemanticGrievance items
+  const result: GroupedSemanticGrievance[] = clusters.map((c) => {
+    // Deterministic ordering of children
+    c.children.sort(compareGrievanceCanonical);
+
+    let matchScore: number | undefined;
+    if (c.scores.length > 0) {
+      const sum = c.scores.reduce((acc, s) => acc + s, 0);
+      matchScore = Number((sum / c.scores.length).toFixed(4));
+    }
+
+    return {
+      parent: c.parent,
+      children: c.children,
+      totalCount: 1 + c.children.length,
+      matchScore,
+    };
+  });
+
+  // 5. Apply sortOrder
+  if (sortOrder === 'desc') {
+    result.sort((a, b) => compareGrievanceCanonical(b.parent, a.parent));
+  } else {
+    result.sort((a, b) => compareGrievanceCanonical(a.parent, b.parent));
+  }
+
+  return result;
+}
+

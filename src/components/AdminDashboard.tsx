@@ -33,6 +33,7 @@ import {
   GitMerge,
 } from 'lucide-react';
 import { Grievance, PriorityLevel, GrievanceStatus } from '../types';
+import { groupSemanticGrievances, GroupedSemanticGrievance } from '../ml/deduplication';
 import {
   PieChart,
   BarChart,
@@ -119,6 +120,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedComplaint, setSelectedComplaint] = useState<Grievance | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
+
+  const toggleGroupExpanded = (parentId: string) => {
+    setExpandedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) {
+        next.delete(parentId);
+      } else {
+        next.add(parentId);
+      }
+      return next;
+    });
+  };
 
   // Department Management & Reassignment States
   const [departmentsList, setDepartmentsList] = useState<Department[]>([]);
@@ -366,14 +380,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [rawVisualData, sortOption]);
 
   // ---------------------------------------------------------------------------
-  // 5. Sort Execution for Complaints Queue
+  // 5. Semantic Grievance Grouping & Sort Execution for Complaints Queue
   // ---------------------------------------------------------------------------
-  const displayedComplaints = useMemo(() => {
-    const list = [...filteredComplaints];
+  const groupedComplaints = useMemo(() => {
+    return groupSemanticGrievances(filteredComplaints);
+  }, [filteredComplaints]);
+
+  const displayedGroups = useMemo(() => {
+    const list = [...groupedComplaints];
 
     const categoryVolumeMap = new Map<string, number>();
-    filteredComplaints.forEach((g) => {
-      categoryVolumeMap.set(g.category, (categoryVolumeMap.get(g.category) || 0) + 1);
+    groupedComplaints.forEach((g) => {
+      categoryVolumeMap.set(g.parent.category, (categoryVolumeMap.get(g.parent.category) || 0) + g.totalCount);
     });
 
     const getPriorityWeight = (p?: PriorityLevel) => {
@@ -385,49 +403,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return list.sort((a, b) => {
       switch (sortOption) {
         case 'date_asc': {
-          const timeA = new Date(a.resolvedAt || a.createdAt).getTime();
-          const timeB = new Date(b.resolvedAt || b.createdAt).getTime();
+          const timeA = new Date(a.parent.resolvedAt || a.parent.createdAt).getTime();
+          const timeB = new Date(b.parent.resolvedAt || b.parent.createdAt).getTime();
           return timeA - timeB;
         }
         case 'priority_desc': {
-          const diff = getPriorityWeight(b.priority) - getPriorityWeight(a.priority);
+          const diff = getPriorityWeight(b.parent.priority) - getPriorityWeight(a.parent.priority);
           if (diff !== 0) return diff;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return new Date(b.parent.createdAt).getTime() - new Date(a.parent.createdAt).getTime();
         }
         case 'priority_asc': {
-          const diff = getPriorityWeight(a.priority) - getPriorityWeight(b.priority);
+          const diff = getPriorityWeight(a.parent.priority) - getPriorityWeight(b.parent.priority);
           if (diff !== 0) return diff;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return new Date(b.parent.createdAt).getTime() - new Date(a.parent.createdAt).getTime();
         }
         case 'volume_desc': {
-          const volA = categoryVolumeMap.get(a.category) || 0;
-          const volB = categoryVolumeMap.get(b.category) || 0;
+          if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
+          const volA = categoryVolumeMap.get(a.parent.category) || 0;
+          const volB = categoryVolumeMap.get(b.parent.category) || 0;
           if (volB !== volA) return volB - volA;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return new Date(b.parent.createdAt).getTime() - new Date(a.parent.createdAt).getTime();
         }
         case 'volume_asc': {
-          const volA = categoryVolumeMap.get(a.category) || 0;
-          const volB = categoryVolumeMap.get(b.category) || 0;
+          if (a.totalCount !== b.totalCount) return a.totalCount - b.totalCount;
+          const volA = categoryVolumeMap.get(a.parent.category) || 0;
+          const volB = categoryVolumeMap.get(b.parent.category) || 0;
           if (volA !== volB) return volA - volB;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return new Date(b.parent.createdAt).getTime() - new Date(a.parent.createdAt).getTime();
         }
         case 'category_asc':
-          return a.category.localeCompare(b.category);
+          return a.parent.category.localeCompare(b.parent.category);
         case 'category_desc':
-          return b.category.localeCompare(a.category);
+          return b.parent.category.localeCompare(a.parent.category);
         case 'name_asc':
-          return a.studentName.localeCompare(b.studentName);
+          return a.parent.studentName.localeCompare(b.parent.studentName);
         case 'ticket_asc':
-          return a.ticketNo.localeCompare(b.ticketNo);
+          return a.parent.ticketNo.localeCompare(b.parent.ticketNo);
         case 'date_desc':
         default: {
-          const timeA = new Date(a.resolvedAt || a.createdAt).getTime();
-          const timeB = new Date(b.resolvedAt || b.createdAt).getTime();
+          const timeA = new Date(a.parent.resolvedAt || a.parent.createdAt).getTime();
+          const timeB = new Date(b.parent.resolvedAt || b.parent.createdAt).getTime();
           return timeB - timeA;
         }
       }
     });
-  }, [filteredComplaints, sortOption]);
+  }, [groupedComplaints, sortOption]);
+
+  const displayedComplaints = useMemo(() => {
+    return displayedGroups.map((g) => g.parent);
+  }, [displayedGroups]);
 
   // Reset pagination on filter or sort change
   React.useEffect(() => {
@@ -443,17 +467,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     sortOption,
   ]);
 
-  const totalPages = Math.max(1, Math.ceil(displayedComplaints.length / ITEMS_PER_PAGE));
-  const paginatedComplaints = useMemo(() => {
+  const totalPages = Math.max(1, Math.ceil(displayedGroups.length / ITEMS_PER_PAGE));
+  const paginatedGroups = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return displayedComplaints.slice(start, start + ITEMS_PER_PAGE);
-  }, [displayedComplaints, currentPage]);
+    return displayedGroups.slice(start, start + ITEMS_PER_PAGE);
+  }, [displayedGroups, currentPage]);
+
+  const paginatedComplaints = useMemo(() => {
+    return paginatedGroups.map((g) => g.parent);
+  }, [paginatedGroups]);
 
   const urgentComplaintsInQueue = useMemo(() => {
-    return displayedComplaints.filter(
-      (g) => !g.isSpam && g.priority === 'urgent' && g.status !== 'resolved'
+    return displayedGroups.filter(
+      (g) => !g.parent.isSpam && g.parent.priority === 'urgent' && g.parent.status !== 'resolved'
     );
-  }, [displayedComplaints]);
+  }, [displayedGroups]);
 
   const getSortLabel = (opt: string) => {
     switch (opt) {
@@ -535,8 +563,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* ========================================================================= */}
       {/* 1.5 ADMIN CONSOLE 3-WAY VIEW NAVIGATION                                  */}
       {/* ========================================================================= */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
-        <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-x-auto scrollbar-none">
+        <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80 shrink-0 flex-wrap gap-1">
           {/* Tab 1: All Tickets / Grievance Management */}
           <button
             id="toggle-view-queue"
@@ -1140,147 +1168,244 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             ) : (
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                {paginatedComplaints.map((item) => {
+                {paginatedGroups.map((group) => {
+                  const item = group.parent;
                   const isSelected = selectedComplaint?.id === item.id;
                   const isResolved = item.status === 'resolved';
+                  const isGrouped = group.totalCount > 1;
+                  const isExpanded = expandedGroupIds.has(item.id);
 
                   return (
                     <div
                       key={item.id}
                       id={`complaint-row-${item.id}`}
-                      className={`p-5 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                      data-testid={`complaint-row-${item.id}`}
+                      className={`p-5 transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/40 flex flex-col justify-between gap-4 ${
                         isSelected ? 'bg-blue-50/40 dark:bg-blue-950/20' : ''
                       }`}
                     >
-                      {/* Left: Metadata, Category, Student Info */}
-                      <div
-                        className="space-y-2 flex-1 cursor-pointer"
-                        onClick={() => setSelectedComplaint(item)}
-                        title="Click to view details & triage actions"
-                      >
-                        <div className="flex items-center flex-wrap gap-2">
-                          {/* Ticket Number */}
-                          <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
-                            {item.ticketNo}
-                          </span>
-
-                          {/* Category Badge */}
-                          <span className="text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/80 px-2.5 py-0.5 rounded-lg border border-blue-100 dark:border-blue-900">
-                            {item.category}
-                          </span>
-
-                          {/* Interactive Priority Selector */}
-                          <select
-                            id={`priority-select-${item.id}`}
-                            value={item.priority || 'medium'}
-                            onChange={(e) => handlePriorityChange(item.id, e.target.value as PriorityLevel)}
-                            onClick={(e) => e.stopPropagation()}
-                            className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg cursor-pointer border-0 ring-1 focus:ring-2 focus:outline-hidden transition-all ${
-                              item.priority === 'urgent'
-                                ? 'bg-red-100 text-red-800 ring-red-200 dark:bg-red-950 dark:text-red-300 dark:ring-red-900'
-                                : item.priority === 'medium'
-                                ? 'bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-900'
-                                : 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700'
-                            }`}
-                          >
-                            <option value="urgent">🔴 Urgent</option>
-                            <option value="medium">🟡 Medium</option>
-                            <option value="less_important">⚪ Less Important</option>
-                          </select>
-
-                          {/* Spam Tag (replaced long string with clean "Spam") */}
-                          {item.isSpam && (
-                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 flex items-center gap-1 border border-amber-200 dark:border-amber-900">
-                              <Sparkles className="w-3 h-3" /> Spam
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        {/* Left: Metadata, Category, Student Info */}
+                        <div
+                          className="space-y-2 flex-1 cursor-pointer"
+                          onClick={() => setSelectedComplaint(item)}
+                          title="Click to view details & triage actions"
+                        >
+                          <div className="flex items-center flex-wrap gap-2">
+                            {/* Ticket Number */}
+                            <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                              {item.ticketNo}
                             </span>
-                          )}
 
-                          {/* Status Badge */}
-                          <span
-                            className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg ${
-                              isResolved
-                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900'
-                                : 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-900'
-                            }`}
-                          >
-                            {isResolved ? 'Resolved' : 'Active'}
-                          </span>
+                            {/* Grouped Merged Badge */}
+                            {isGrouped && (
+                              <span
+                                data-testid={`merged-badge-${item.id}`}
+                                className="text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-lg bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 flex items-center gap-1 border border-indigo-200 dark:border-indigo-900"
+                                title="Identical semantic complaints automatically unified under this earliest parent issue"
+                              >
+                                <GitMerge className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                                <span>Merged Group ({group.totalCount} complaints)</span>
+                              </span>
+                            )}
+
+                            {/* Category Badge */}
+                            <span className="text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/80 px-2.5 py-0.5 rounded-lg border border-blue-100 dark:border-blue-900">
+                              {item.category}
+                            </span>
+
+                            {/* Interactive Priority Selector */}
+                            <select
+                              id={`priority-select-${item.id}`}
+                              value={item.priority || 'medium'}
+                              onChange={(e) => handlePriorityChange(item.id, e.target.value as PriorityLevel)}
+                              onClick={(e) => e.stopPropagation()}
+                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg cursor-pointer border-0 ring-1 focus:ring-2 focus:outline-hidden transition-all ${
+                                item.priority === 'urgent'
+                                  ? 'bg-red-100 text-red-800 ring-red-200 dark:bg-red-950 dark:text-red-300 dark:ring-red-900'
+                                  : item.priority === 'medium'
+                                  ? 'bg-amber-100 text-amber-800 ring-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-900'
+                                  : 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700'
+                              }`}
+                            >
+                              <option value="urgent">🔴 Urgent</option>
+                              <option value="medium">🟡 Medium</option>
+                              <option value="less_important">⚪ Less Important</option>
+                            </select>
+
+                            {/* Spam Tag */}
+                            {item.isSpam && (
+                              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 flex items-center gap-1 border border-amber-200 dark:border-amber-900">
+                                <Sparkles className="w-3 h-3" /> Spam
+                              </span>
+                            )}
+
+                            {/* Status Badge */}
+                            <span
+                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-lg ${
+                                isResolved
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900'
+                                  : 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-900'
+                              }`}
+                            >
+                              {isResolved ? 'Resolved' : 'Active'}
+                            </span>
+                          </div>
+
+                          {/* Complaint Description Snippet */}
+                          <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-sans line-clamp-2">
+                            {item.description}
+                          </p>
+
+                          {/* Student Info & Timestamps */}
+                          <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                            <span className="flex items-center gap-1 font-medium text-slate-800 dark:text-slate-200">
+                              <User className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{item.studentName}</span>
+                              <span className="text-slate-400 font-mono">({item.studentRegNo})</span>
+                            </span>
+
+                            {item.studentType === 'dayscholar' ? (
+                              <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 font-bold rounded text-[10px]">
+                                Dayscholar
+                              </span>
+                            ) : (
+                              item.roomNo && (
+                                <span className="flex items-center gap-1">
+                                  <Building className="w-3 h-3 text-slate-400" />
+                                  <span>{item.hostelBlock} - Room {item.roomNo}</span>
+                                </span>
+                              )
+                            )}
+
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-slate-400" />
+                              <span>{new Date(item.createdAt).toLocaleString()}</span>
+                            </span>
+
+                            {item.adminNotes && (
+                              <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-medium bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded">
+                                Note: {item.adminNotes}
+                              </span>
+                            )}
+
+                            {isGrouped && (
+                              <button
+                                type="button"
+                                id={`toggle-group-${item.id}`}
+                                data-testid={`toggle-group-${item.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleGroupExpanded(item.id);
+                                }}
+                                className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 inline-flex items-center gap-1 cursor-pointer ml-1"
+                              >
+                                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                <span>{isExpanded ? 'Hide' : 'View'} {group.children.length} merged ticket{group.children.length > 1 ? 's' : ''}</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
 
-                        {/* Complaint Description Snippet */}
-                        <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-sans line-clamp-2">
-                          {item.description}
-                        </p>
+                        {/* Right: Primary Action Buttons */}
+                        <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                          <button
+                            id={`view-details-btn-${item.id}`}
+                            onClick={() => setSelectedComplaint(item)}
+                            className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                            <span>Manage</span>
+                          </button>
 
-                        {/* Student Info & Timestamps */}
-                        <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
-                          <span className="flex items-center gap-1 font-medium text-slate-800 dark:text-slate-200">
-                            <User className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{item.studentName}</span>
-                            <span className="text-slate-400 font-mono">({item.studentRegNo})</span>
-                          </span>
-
-                          {item.studentType === 'dayscholar' ? (
-                            <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 font-bold rounded text-[10px]">
-                              Dayscholar
-                            </span>
+                          {!isResolved ? (
+                            <button
+                              id={`quick-done-btn-${item.id}`}
+                              data-testid={`quick-done-btn-${item.id}`}
+                              onClick={() => handleResolveClick(item)}
+                              disabled={processingId === item.id}
+                              className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60 transition-colors"
+                              title={isGrouped ? `Resolve parent and all ${group.children.length} grouped child complaints` : 'Resolve complaint'}
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Done{isGrouped ? ` (${group.totalCount})` : ''}</span>
+                            </button>
                           ) : (
-                            item.roomNo && (
-                              <span className="flex items-center gap-1">
-                                <Building className="w-3 h-3 text-slate-400" />
-                                <span>{item.hostelBlock} - Room {item.roomNo}</span>
-                              </span>
+                            onReopen && (
+                              <button
+                                id={`reopen-btn-${item.id}`}
+                                onClick={() => handleReopenClick(item)}
+                                className="px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+                                title="Re-open this complaint if issue recurs"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Re-open</span>
+                              </button>
                             )
                           )}
-
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3 text-slate-400" />
-                            <span>{new Date(item.createdAt).toLocaleString()}</span>
-                          </span>
-
-                          {item.adminNotes && (
-                            <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-medium bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded">
-                              Note: {item.adminNotes}
-                            </span>
-                          )}
                         </div>
                       </div>
 
-                      {/* Right: Primary Action Buttons */}
-                      <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-                        <button
-                          id={`view-details-btn-${item.id}`}
-                          onClick={() => setSelectedComplaint(item)}
-                          className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                      {/* Expandable Child Complaints Drawer */}
+                      {isGrouped && isExpanded && (
+                        <div
+                          id={`grouped-drawer-${item.id}`}
+                          data-testid={`grouped-drawer-${item.id}`}
+                          className="mt-2 pt-3 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/70 dark:bg-slate-900/60 rounded-2xl p-3 space-y-2.5"
                         >
-                          <Eye className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-                          <span>Manage</span>
-                        </button>
-
-                        {!isResolved ? (
-                          <button
-                            id={`quick-done-btn-${item.id}`}
-                            onClick={() => handleResolveClick(item)}
-                            disabled={processingId === item.id}
-                            className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60 transition-colors"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Done</span>
-                          </button>
-                        ) : (
-                          onReopen && (
-                            <button
-                              id={`reopen-btn-${item.id}`}
-                              onClick={() => handleReopenClick(item)}
-                              className="px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
-                              title="Re-open this complaint if issue recurs"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Re-open</span>
-                            </button>
-                          )
-                        )}
-                      </div>
+                          <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            <span className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-400">
+                              <Layers className="w-3.5 h-3.5" />
+                              <span>Underlying Grouped Complaints ({group.children.length})</span>
+                            </span>
+                            {group.matchScore !== undefined && (
+                              <span className="font-mono text-[10px] text-slate-400">
+                                Match Score: {(group.matchScore * 100).toFixed(0)}%
+                              </span>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            {group.children.map((child) => (
+                              <div
+                                key={child.id}
+                                id={`child-complaint-${child.id}`}
+                                data-testid={`child-complaint-${child.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedComplaint(child);
+                                }}
+                                className="p-3 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 hover:border-indigo-300 dark:hover:border-indigo-600 cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-colors shadow-2xs"
+                              >
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-mono text-[11px] font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+                                    #{child.ticketNo}
+                                  </span>
+                                  <span className="font-medium text-slate-800 dark:text-slate-200">
+                                    {child.studentName} ({child.studentRegNo})
+                                  </span>
+                                  <span className="text-slate-500 text-[11px] line-clamp-1 max-w-md">
+                                    {child.description}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0 text-[10px]">
+                                  <span className="text-slate-400">
+                                    {new Date(child.createdAt).toLocaleDateString()}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded font-bold uppercase ${
+                                      child.status === 'resolved'
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                        : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                                    }`}
+                                  >
+                                    {child.status}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1436,6 +1561,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   {selectedComplaint.description}
                 </div>
               </div>
+
+              {/* Grouped / Merged Child Complaints Section */}
+              {(() => {
+                const selectedGroup = groupedComplaints.find((g) => g.parent.id === selectedComplaint.id);
+                if (selectedGroup && selectedGroup.children.length > 0) {
+                  return (
+                    <div className="p-4 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold uppercase tracking-wider text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                          <GitMerge className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                          <span>Grouped / Merged Child Complaints ({selectedGroup.children.length})</span>
+                        </label>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          Cascades resolution to all {selectedGroup.totalCount} complaints
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {selectedGroup.children.map((child) => (
+                          <div
+                            key={child.id}
+                            className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-[11px] font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded">
+                                #{child.ticketNo}
+                              </span>
+                              <span className="font-medium text-slate-800 dark:text-slate-200">
+                                {child.studentName} ({child.studentRegNo})
+                              </span>
+                              <span className="text-slate-500 text-[11px] line-clamp-1 max-w-sm">
+                                {child.description}
+                              </span>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                child.status === 'resolved'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                              }`}
+                            >
+                              {child.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {/* Priority Triage Action */}
               <div>

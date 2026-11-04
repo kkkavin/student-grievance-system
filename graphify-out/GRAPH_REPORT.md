@@ -1,26 +1,26 @@
-# Graph Report - student-grievance-system  (2026-11-03)
+# Graph Report - student-grievance-system  (2026-11-04)
 
 ## Corpus Check
-- 65 files · ~123,225 words
+- 77 files · ~145,147 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 7 file(s) not represented in the graph (top: (none) 2, .example 1, .lock 1)
 
 ## Summary
-- 481 nodes · 1295 edges · 21 communities (18 shown, 3 thin omitted)
-- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 17 edges (avg confidence: 0.85)
+- 529 nodes · 1476 edges · 27 communities (23 shown, 4 thin omitted)
+- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 29 edges (avg confidence: 0.89)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `ab81a851`
+- Built from commit: `5d5ff4db`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- Frontend UI Components & Client State
-- SQLite Database Engine & Data Access Layer
+- App.tsx
+- Project: Semantic Grievance Merging & Bulk-Resolution Pipeline
 - Deduplication Engine & Test Fixtures
-- Admin & Department Analytics Dashboards
-- Client API Services & Routing Management
+- AdminDashboard.tsx
+- Charts.tsx
 - JWT Authentication & Server Middleware
 - Analytics Rollup & Risk Forecasting
 - Development Dependencies & Tooling
@@ -29,37 +29,43 @@
 - ML Complaint Classifier & Spam Detection
 - Production Runtime Dependencies
 - TypeScript Compiler Configuration
-- OTP Email & Notification Services
+- api.ts
 - Project NPM Scripts & Automation
 - Vite Bundler & Tailwind CSS Configuration
 - Package Security & Build Scripts
 - Git Push Automation Workflow
 - HTML Entry Point & Bootstrap
 - Application Favicon & Assets
+- stress_analytics_concurrency.test.ts
+- Grievance
+- AuthModal.tsx
+- types.ts
+- getAuthHeaders
+- motion@^12.23.24
 
 ## God Nodes (most connected - your core abstractions)
-1. `getDatabase()` - 51 edges
-2. `getAuthHeaders()` - 26 edges
-3. `Grievance` - 16 edges
-4. `react` - 15 edges
-5. `compilerOptions` - 15 edges
-6. `getGrievanceById()` - 14 edges
-7. `lucide-react` - 14 edges
-8. `AdminDashboard()` - 14 edges
-9. `UserProfile` - 13 edges
-10. `App()` - 12 edges
+1. `getDatabase()` - 56 edges
+2. `getAuthHeaders()` - 27 edges
+3. `Grievance` - 21 edges
+4. `getGrievanceById()` - 15 edges
+5. `react` - 15 edges
+6. `AdminDashboard()` - 15 edges
+7. `compilerOptions` - 15 edges
+8. `lucide-react` - 14 edges
+9. `App()` - 13 edges
+10. `generateEmbeddingVector()` - 13 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `restoreDefaultRoutingRules()` --calls--> `getDatabase()`  [EXTRACTED]
-  test/challenger_m2_autorouting.test.ts → db.ts
-- `extractUserFromRequest()` --calls--> `verifyToken()`  [EXTRACTED]
-  server.ts → src/utils/jwt.ts
-- `authenticateJWT()` --calls--> `verifyToken()`  [EXTRACTED]
-  server.ts → src/utils/jwt.ts
-- `enforceGrievanceRLAC()` --calls--> `verifyToken()`  [EXTRACTED]
-  server.ts → src/utils/jwt.ts
-- `DepartmentNotificationPayload` --references--> `Grievance`  [EXTRACTED]
-  server.ts → src/types.ts
+- `Code Layout` --references--> `resolveGrievanceCascadeApi()`  [INFERRED]
+  PROJECT.md → src/api.ts
+- `Architecture` --references--> `groupSemanticGrievances()`  [INFERRED]
+  PROJECT.md → src/ml/deduplication.ts
+- `Code Layout` --references--> `groupSemanticGrievances()`  [INFERRED]
+  PROJECT.md → src/ml/deduplication.ts
+- `Feature Inventory` --references--> `resolveGrievanceCascadeApi()`  [INFERRED]
+  PROJECT.md → src/api.ts
+- `Feature Inventory` --references--> `groupSemanticGrievances()`  [INFERRED]
+  PROJECT.md → src/ml/deduplication.ts
 
 ## Import Cycles
 - None detected.
@@ -69,35 +75,35 @@
 - **Four-Tier Testing and Verification Pipeline** — test_infra_four_tier_suite, test_infra_bva_specification, test_ready_readiness_signal [EXTRACTED 1.00]
 - **Knowledge Graph Synchronization & Tooling** — _agents_skills_git_push_skill_pre_push_verification, claude_graphify_guidelines, readme_graphify_integration [INFERRED 0.85]
 
-## Communities (21 total, 3 thin omitted)
+## Communities (27 total, 4 thin omitted)
 
-### Community 0 - "Frontend UI Components & Client State"
-Cohesion: 0.06
-Nodes (75): lucide-react, react, DepartmentNotificationPayload, adminLoginApi(), AdminLoginResponse, assignUserDepartmentApi(), clearAuthToken(), createDepartmentApi() (+67 more)
+### Community 0 - "App.tsx"
+Cohesion: 0.19
+Nodes (13): lucide-react, react, clearAuthToken(), saveUserApi(), App(), FAQSection(), ProfileModal(), DAYSCHOLAR_CATEGORIES (+5 more)
 
-### Community 1 - "SQLite Database Engine & Data Access Layer"
-Cohesion: 0.10
-Nodes (53): createDepartment(), createGrievance(), createRoutingRule(), DB_PATH, deleteRoutingRule(), formatDepartmentRow(), formatGrievanceRow(), formatUserRow() (+45 more)
+### Community 1 - "Project: Semantic Grievance Merging & Bulk-Resolution Pipeline"
+Cohesion: 0.33
+Nodes (5): Backend Resolution API ↔ Frontend Client, Interface Contracts, Milestones, Project: Semantic Grievance Merging & Bulk-Resolution Pipeline, `src/ml/deduplication.ts` ↔ Dashboards & Backend
 
 ### Community 2 - "Deduplication Engine & Test Fixtures"
-Cohesion: 0.09
-Nodes (22): AUTO_MERGE_THRESHOLD, checkLocationAdjacency(), computeCosineSimilarity(), DEDICATED_VOCAB, extractFloorFromRoom(), extractRouteNumber(), fnv1a(), generateEmbeddingVector() (+14 more)
+Cohesion: 0.07
+Nodes (73): createDepartment(), createGrievance(), createRoutingRule(), DB_PATH, deleteRoutingRule(), formatDepartmentRow(), formatGrievanceRow(), formatUserRow() (+65 more)
 
-### Community 3 - "Admin & Department Analytics Dashboards"
-Cohesion: 0.08
-Nodes (47): detachTicketApi(), fetchAnalyticsTrendsApi(), fetchRiskForecastApi(), fetchTriageQueueApi(), mergeTicketsApi(), reassignGrievanceApi(), ActiveViewSection, AdminDashboard() (+39 more)
+### Community 3 - "AdminDashboard.tsx"
+Cohesion: 0.16
+Nodes (20): Feature Inventory, escalateGrievanceApi(), fetchDepartmentsApi(), fetchGrievances(), reassignGrievanceApi(), requestReassignGrievanceApi(), resolveGrievanceCascadeApi(), updateGrievanceApi() (+12 more)
 
-### Community 4 - "Client API Services & Routing Management"
-Cohesion: 0.40
-Nodes (3): BENCHMARK_METRICS, getPercentile(), getStats()
+### Community 4 - "Charts.tsx"
+Cohesion: 0.10
+Nodes (35): fetchAnalyticsTrendsApi(), fetchRiskForecastApi(), BarChart(), BarChartProps, CATEGORY_COLOR_MAP, ChartCard(), ChartCardProps, describeArc() (+27 more)
 
 ### Community 5 - "JWT Authentication & Server Middleware"
-Cohesion: 0.17
-Nodes (21): RFC-7519, authenticateJWT(), JWTPayload, base64UrlDecode(), base64UrlEncode(), signJwt, signToken(), verifyJwt (+13 more)
+Cohesion: 0.09
+Nodes (34): RFC-7519, authenticateJWT(), JWTPayload, base64UrlDecode(), base64UrlEncode(), signJwt, signToken(), verifyJwt (+26 more)
 
 ### Community 6 - "Analytics Rollup & Risk Forecasting"
-Cohesion: 0.17
-Nodes (23): computeHostelMaintenanceRollup(), computeRolling7DayVelocity(), computeTransportRollup(), computeWifiDensityMatrix(), getCampusTrendAnalytics(), inferIssueType(), inferTransportIncidentType(), computeRiskForecast() (+15 more)
+Cohesion: 0.10
+Nodes (23): GroupedSemanticGrievance, VECTOR_DIMENSION, computeHostelMaintenanceRollup(), computeRolling7DayVelocity(), computeTransportRollup(), computeWifiDensityMatrix(), getCampusTrendAnalytics(), inferIssueType() (+15 more)
 
 ### Community 7 - "Development Dependencies & Tooling"
 Cohesion: 0.13
@@ -117,15 +123,15 @@ Nodes (11): CATEGORY_ICONS, ClassificationResult, defaultClassifier, ModelMetada
 
 ### Community 11 - "Production Runtime Dependencies"
 Cohesion: 0.12
-Nodes (17): dependencies, dotenv@^17.2.3, express@^4.21.2, @google/genai@^2.4.0, lucide-react@^0.546.0, motion@^12.23.24, nodemailer@^10.0.10, react@^19.0.1 (+9 more)
+Nodes (17): dependencies, dotenv@^17.2.3, @emailjs/browser@^4.4.1, express@^4.21.2, @google/genai@^2.4.0, lucide-react@^0.546.0, nodemailer@^10.0.10, react@^19.0.1 (+9 more)
 
 ### Community 12 - "TypeScript Compiler Configuration"
 Cohesion: 0.12
 Nodes (15): compilerOptions, allowImportingTsExtensions, allowJs, experimentalDecorators, isolatedModules, jsx, lib, module (+7 more)
 
-### Community 13 - "OTP Email & Notification Services"
-Cohesion: 0.20
-Nodes (10): @emailjs/browser@^4.4.1, @emailjs/browser, sendOTPEmail(), SendOtpParams, SendOtpResult, verifyOTPEmail(), PUBLIC_KEY, sendOTPEmail() (+2 more)
+### Community 13 - "api.ts"
+Cohesion: 0.19
+Nodes (18): detachTicket, detachTicketApi(), fetchAnalyticsTrends, FetchGrievancesParams, fetchRiskForecast, fetchTriageQueue, fetchTriageQueueApi(), getUserApi() (+10 more)
 
 ### Community 14 - "Project NPM Scripts & Automation"
 Cohesion: 0.20
@@ -143,25 +149,45 @@ Nodes (4): allowScripts, esbuild@0.28.2, @google/genai@2.31.0, protobufjs@7.6.6
 Cohesion: 0.67
 Nodes (3): Git Push Workflow, Pre-Push Verification & Health Checks, Push Helper Script (push.ps1)
 
+### Community 21 - "stress_analytics_concurrency.test.ts"
+Cohesion: 0.40
+Nodes (3): BENCHMARK_METRICS, getPercentile(), getStats()
+
+### Community 22 - "Grievance"
+Cohesion: 0.17
+Nodes (16): CascadingResolutionResult, DepartmentNotificationPayload, AdminLoginResponse, createGrievanceApi(), SanitizedStudentGrievance, AuthModalProps, DepartmentDashboardProps, ProfileModalProps (+8 more)
+
+### Community 23 - "AuthModal.tsx"
+Cohesion: 0.19
+Nodes (14): adminLoginApi(), loginUserApi(), registerUserApi(), setAuthToken(), AuthModal(), TEST_STAFF_CREDENTIALS, sendOTPEmail(), SendOtpParams (+6 more)
+
+### Community 24 - "types.ts"
+Cohesion: 0.12
+Nodes (15): AcademicBranch, AuditLogEntry, CalendarMultipliers, CategoryRoutingRule, FAQItem, HostelBlockRollup, HostelFloorRollup, HostelIssueTypeRollup (+7 more)
+
+### Community 25 - "getAuthHeaders"
+Cohesion: 0.37
+Nodes (12): assignUserDepartmentApi(), createDepartmentApi(), createRoutingRuleApi(), deleteRoutingRuleApi(), fetchAdminDepartmentsApi(), fetchAuditLogsApi(), fetchRoutingRulesApi(), getAuthHeaders() (+4 more)
+
 ## Knowledge Gaps
 - **13 isolated node(s):** `RFC-7519`, `Boundary Value Analysis (BVA) Specification`, `4-Tier Test Suite Architecture`, `Monthly Risk Severity Scoring Engine`, `Push Helper Script (push.ps1)` (+8 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 123 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **3 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 139 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **4 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `react` connect `Frontend UI Components & Client State` to `Admin & Department Analytics Dashboards`, `Report Generation & Export Utilities`, `Production Runtime Dependencies`, `Development Dependencies & Tooling`?**
-  _High betweenness centrality (0.052) - this node is a cross-community bridge._
+- **Why does `react` connect `App.tsx` to `AdminDashboard.tsx`, `Charts.tsx`, `Development Dependencies & Tooling`, `Report Generation & Export Utilities`, `Production Runtime Dependencies`, `api.ts`, `Grievance`, `AuthModal.tsx`, `getAuthHeaders`?**
+  _High betweenness centrality (0.047) - this node is a cross-community bridge._
 - **What connects `RFC-7519`, `Boundary Value Analysis (BVA) Specification`, `4-Tier Test Suite Architecture` to the rest of the system?**
   _13 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Frontend UI Components & Client State` be split into smaller, more focused modules?**
-  _Cohesion score 0.06267166042446941 - nodes in this community are weakly interconnected._
-- **Why does `lucide-react` connect `Frontend UI Components & Client State` to `Admin & Department Analytics Dashboards`, `Report Generation & Export Utilities`, `Production Runtime Dependencies`, `Development Dependencies & Tooling`?**
-  _High betweenness centrality (0.049) - this node is a cross-community bridge._
-- **Should `SQLite Database Engine & Data Access Layer` be split into smaller, more focused modules?**
-  _Cohesion score 0.0967741935483871 - nodes in this community are weakly interconnected._
-- **Why does `getDatabase()` connect `SQLite Database Engine & Data Access Layer` to `Frontend UI Components & Client State`, `Deduplication Engine & Test Fixtures`, `Client API Services & Routing Management`, `JWT Authentication & Server Middleware`?**
-  _High betweenness centrality (0.034) - this node is a cross-community bridge._
 - **Should `Deduplication Engine & Test Fixtures` be split into smaller, more focused modules?**
-  _Cohesion score 0.0946938775510204 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07215980024968789 - nodes in this community are weakly interconnected._
+- **Why does `getDatabase()` connect `Deduplication Engine & Test Fixtures` to `api.ts`, `stress_analytics_concurrency.test.ts`, `JWT Authentication & Server Middleware`, `Analytics Rollup & Risk Forecasting`?**
+  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+- **Should `Charts.tsx` be split into smaller, more focused modules?**
+  _Cohesion score 0.09759759759759759 - nodes in this community are weakly interconnected._
+- **Why does `lucide-react` connect `App.tsx` to `AdminDashboard.tsx`, `Charts.tsx`, `Development Dependencies & Tooling`, `Report Generation & Export Utilities`, `Production Runtime Dependencies`, `api.ts`, `Grievance`, `AuthModal.tsx`, `getAuthHeaders`?**
+  _High betweenness centrality (0.045) - this node is a cross-community bridge._
+- **Should `JWT Authentication & Server Middleware` be split into smaller, more focused modules?**
+  _Cohesion score 0.0886615515771526 - nodes in this community are weakly interconnected._

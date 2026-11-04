@@ -10,6 +10,7 @@ import {
   CategoryRoutingRule,
   AuditLogEntry,
   UserRole,
+  ResolveGrievanceResponse,
 } from './types';
 
 export interface SanitizedStudentGrievance extends Grievance {
@@ -116,6 +117,66 @@ export async function updateGrievanceApi(
   }
   return res.json();
 }
+
+/**
+ * Single-Click Cascading Resolution Frontend API Helper
+ * Invokes POST /api/grievances/:id/resolve with JWT authorization headers.
+ * Resolves root parent grievance and all linked child complaints simultaneously.
+ * Gracefully falls back to PUT /api/grievances/:id if endpoint is unavailable.
+ */
+export async function resolveGrievanceCascadeApi(
+  id: string,
+  notes?: string,
+  childIds?: string[]
+): Promise<ResolveGrievanceResponse> {
+  const payload: { resolutionNote?: string; adminNotes?: string; childIds?: string[] } = {};
+  if (notes !== undefined) {
+    payload.resolutionNote = notes;
+    payload.adminNotes = notes;
+  }
+  if (Array.isArray(childIds) && childIds.length > 0) {
+    payload.childIds = childIds;
+  }
+
+  const res = await fetch(`/api/grievances/${encodeURIComponent(id)}/resolve`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      throw new Error(errorData.error || 'Unauthorized: Please log in to resolve grievances.');
+    }
+    if (res.status === 403) {
+      throw new Error(errorData.error || 'Access denied: You are not authorized to resolve this grievance.');
+    }
+    if (res.status === 404 && errorData.error === 'Grievance not found') {
+      throw new Error('Grievance not found');
+    }
+    // Graceful fallback for legacy backend or 404/405 route in rolling deploy
+    if (res.status === 404 || res.status === 405) {
+      console.warn('POST /resolve endpoint not found, falling back to PUT /api/grievances/:id');
+      const updated = await updateGrievanceApi(id, {
+        status: 'resolved',
+        resolvedAt: new Date().toISOString(),
+        adminNotes: notes,
+      });
+      return {
+        success: true,
+        parent: updated,
+        resolvedChildrenCount: 0,
+        childIds: [],
+      };
+    }
+    throw new Error(errorData.error || `Failed to resolve grievance (${res.status}): ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
+export const resolveGrievanceCascade = resolveGrievanceCascadeApi;
 
 // ---------------------------------------------------------------------------
 // Authentication API
