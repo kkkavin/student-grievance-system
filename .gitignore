@@ -39,4 +39,21 @@ verify_report.py
 linguistic_humanizer.py
 report_sections/
 __pycache__/
+*/__pycache__/
 .chrome_tmp/
+
+# Next.js & Frontend
+.next/
+frontend/.next/
+out/
+*.tsbuildinfo
+frontend/*.tsbuildinfo
+
+# Python Virtual Environments & Testing Caches
+.venv/
+venv/
+ENV/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/

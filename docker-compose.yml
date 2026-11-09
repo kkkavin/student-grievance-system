@@ -1,0 +1,86 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: grievance-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: grievance_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d grievance_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - grievance_net
+
+  fastapi:
+    container_name: grievance-fastapi
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/grievance_db
+      FASTAPI_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api
+      JWT_SECRET: grievance-system-jwt-secret-key-prod-2026
+      ENVIRONMENT: development
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - grievance_net
+
+  frontend:
+    container_name: grievance-frontend
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: ./Dockerfile.frontend
+    command: npm run dev
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      FASTAPI_URL: http://fastapi:8000
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    networks:
+      - grievance_net
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  grievance_net:
+    driver: bridge

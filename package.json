@@ -1,48 +1,24 @@
 {
-  "name": "react-example",
+  "name": "campus-grievance-monorepo",
+  "version": "2.0.0",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
+  "description": "Production Full-Stack AI Campus Grievance Redressal System Monorepo",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit",
-    "graphify": "graphify . --code-only && graphify cluster-only . --no-label",
-    "graphify:watch": "graphify watch .",
-    "graphify:update": "graphify update .",
-    "graphify:viz": "graphify export html"
-  },
-  "dependencies": {
-    "@emailjs/browser": "^4.4.1",
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "nodemailer": "^10.0.10",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "vite": "^6.2.3",
-    "xlsx": "^0.18.5"
+    "setup": "node scripts/setup.mjs",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"FASTAPI,NEXTJS\" -c \"cyan.bold,magenta.bold\" \"npm run backend\" \"npm run frontend\"",
+    "backend": "node scripts/run.mjs backend",
+    "frontend": "npm --prefix frontend run dev",
+    "db:seed": "node scripts/run.mjs db:seed",
+    "db:reset": "node scripts/run.mjs db:reset",
+    "test": "node scripts/run.mjs test",
+    "test:backend": "node scripts/run.mjs test:backend",
+    "test:frontend": "npm --prefix frontend test",
+    "build": "npm --prefix frontend run build",
+    "lint": "node scripts/run.mjs lint",
+    "graphify:update": "graphify update . --force"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.14.0",
-    "@types/nodemailer": "^8.0.2",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3"
-  },
-  "allowScripts": {
-    "@google/genai@2.31.0": true,
-    "protobufjs@7.6.6": true,
-    "esbuild@0.28.2": true
+    "concurrently": "^9.1.2"
   }
 }
