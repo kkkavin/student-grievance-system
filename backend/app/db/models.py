@@ -28,10 +28,7 @@ from pgvector.sqlalchemy import Vector
 try:
     from backend.app.db.session import Base
 except ImportError:
-    try:
-        from app.db.session import Base
-    except ImportError:
-        from backend.db.base import Base
+    from app.db.session import Base
 
 
 def _parse_iso_datetime(val: Any) -> Optional[datetime]:
@@ -79,9 +76,13 @@ class Department(Base):
     users: Mapped[List["User"]] = relationship(
         "User", back_populates="department_rel", foreign_keys="User.department_id"
     )
-    complaints: Mapped[List["Complaint"]] = relationship(
-        "Complaint", back_populates="assigned_department", foreign_keys="Complaint.assigned_department_id"
+    grievances: Mapped[List["Grievance"]] = relationship(
+        "Grievance", back_populates="assigned_department", foreign_keys="Grievance.assigned_department_id"
     )
+
+    @property
+    def complaints(self) -> List["Grievance"]:
+        return self.grievances
     routing_rules: Mapped[List["CategoryRoutingRule"]] = relationship(
         "CategoryRoutingRule",
         back_populates="department",
@@ -187,13 +188,17 @@ class User(Base):
     department_rel: Mapped[Optional["Department"]] = relationship(
         "Department", back_populates="users", foreign_keys=[department_id]
     )
-    complaints: Mapped[List["Complaint"]] = relationship(
-        "Complaint",
+    grievances: Mapped[List["Grievance"]] = relationship(
+        "Grievance",
         back_populates="student_user",
-        primaryjoin="foreign(Complaint.student_reg_no) == User.reg_no",
+        primaryjoin="foreign(Grievance.student_reg_no) == User.reg_no",
     )
-    upvotes: Mapped[List["ComplaintUpvote"]] = relationship(
-        "ComplaintUpvote", back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+
+    @property
+    def complaints(self) -> List["Grievance"]:
+        return self.grievances
+    upvotes: Mapped[List["GrievanceUpvote"]] = relationship(
+        "GrievanceUpvote", back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
 
     # TypeScript camelCase parity properties
@@ -281,10 +286,10 @@ class User(Base):
 
 
 # ============================================================================
-# 3. COMPLAINT MODEL
+# 3. GRIEVANCE MODEL (Standardized Domain Entity, Table: complaints)
 # ============================================================================
 
-class Complaint(Base):
+class Grievance(Base):
     """
     Grievance record containing student reporting details, classification,
     resolution status, department routing, and pgvector embedding for semantic deduplication.
@@ -329,6 +334,15 @@ class Complaint(Base):
     master_case_id: Mapped[Optional[str]] = mapped_column(
         String(64), ForeignKey("complaints.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    duplicate_of_id: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("complaints.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    duplicate_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0"), nullable=False
+    )
+    intercepted_by_dedup: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     location_tag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     source_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     embedding: Mapped[Optional[List[float]]] = mapped_column(Vector(384), nullable=True)
@@ -353,21 +367,21 @@ class Complaint(Base):
 
     # Relationships
     assigned_department: Mapped[Optional["Department"]] = relationship(
-        "Department", back_populates="complaints", foreign_keys=[assigned_department_id]
+        "Department", back_populates="grievances", foreign_keys=[assigned_department_id]
     )
-    master_case: Mapped[Optional["Complaint"]] = relationship(
-        "Complaint", remote_side=[id], back_populates="duplicate_cases", foreign_keys=[master_case_id]
+    master_case: Mapped[Optional["Grievance"]] = relationship(
+        "Grievance", remote_side=[id], back_populates="duplicate_cases", foreign_keys=[master_case_id]
     )
-    duplicate_cases: Mapped[List["Complaint"]] = relationship(
-        "Complaint", back_populates="master_case", foreign_keys=[master_case_id]
+    duplicate_cases: Mapped[List["Grievance"]] = relationship(
+        "Grievance", back_populates="master_case", foreign_keys=[master_case_id]
     )
     student_user: Mapped[Optional["User"]] = relationship(
         "User",
-        back_populates="complaints",
-        primaryjoin="foreign(Complaint.student_reg_no) == User.reg_no",
+        back_populates="grievances",
+        primaryjoin="foreign(Grievance.student_reg_no) == User.reg_no",
     )
-    upvotes: Mapped[List["ComplaintUpvote"]] = relationship(
-        "ComplaintUpvote", back_populates="complaint", cascade="all, delete-orphan", passive_deletes=True
+    upvotes: Mapped[List["GrievanceUpvote"]] = relationship(
+        "GrievanceUpvote", back_populates="grievance", cascade="all, delete-orphan", passive_deletes=True
     )
 
     # TypeScript camelCase parity properties
@@ -485,19 +499,70 @@ class Complaint(Base):
 
     @property
     def masterCaseId(self) -> Optional[str]:
-        return self.master_case_id
+        return self.duplicate_of_id or self.master_case_id
 
     @masterCaseId.setter
     def masterCaseId(self, val: Optional[str]) -> None:
         self.master_case_id = val
+        self.duplicate_of_id = val
 
     @property
     def duplicateOfId(self) -> Optional[str]:
-        return self.master_case_id
+        return self.duplicate_of_id or self.master_case_id
 
     @duplicateOfId.setter
     def duplicateOfId(self, val: Optional[str]) -> None:
+        self.duplicate_of_id = val
         self.master_case_id = val
+
+    @property
+    def duplicateCount(self) -> int:
+        return self.duplicate_count
+
+    @duplicateCount.setter
+    def duplicateCount(self, val: int) -> None:
+        self.duplicate_count = val
+
+    @property
+    def interceptedByDedup(self) -> bool:
+        return self.intercepted_by_dedup
+
+    @interceptedByDedup.setter
+    def interceptedByDedup(self, val: bool) -> None:
+        self.intercepted_by_dedup = val
+
+    def __init__(self, **kwargs):
+        if "duplicate_count" not in kwargs:
+            kwargs["duplicate_count"] = 0
+        if "intercepted_by_dedup" not in kwargs:
+            kwargs["intercepted_by_dedup"] = False
+        super().__init__(**kwargs)
+
+    @validates("master_case_id")
+    def validate_master_case_id(self, key: str, value: Any) -> Any:
+        if getattr(self, "_syncing_dup_ids", False):
+            return value
+        if value:
+            self._syncing_dup_ids = True
+            try:
+                self.duplicate_of_id = value
+                self.intercepted_by_dedup = True
+            finally:
+                self._syncing_dup_ids = False
+        return value
+
+    @validates("duplicate_of_id")
+    def validate_duplicate_of_id(self, key: str, value: Any) -> Any:
+        if getattr(self, "_syncing_dup_ids", False):
+            return value
+        if value:
+            self._syncing_dup_ids = True
+            try:
+                self.master_case_id = value
+                self.intercepted_by_dedup = True
+            finally:
+                self._syncing_dup_ids = False
+        return value
 
     @property
     def locationTag(self) -> Optional[str]:
@@ -610,7 +675,12 @@ class Complaint(Base):
             "assigned_department_id": self.assigned_department_id,
             "masterCaseId": self.master_case_id,
             "master_case_id": self.master_case_id,
-            "duplicateOfId": self.master_case_id,
+            "duplicateOfId": self.duplicate_of_id,
+            "duplicate_of_id": self.duplicate_of_id,
+            "duplicateCount": self.duplicate_count,
+            "duplicate_count": self.duplicate_count,
+            "interceptedByDedup": self.intercepted_by_dedup,
+            "intercepted_by_dedup": self.intercepted_by_dedup,
             "locationTag": self.location_tag,
             "location_tag": self.location_tag,
             "hostelBlock": self.hostel_block,
@@ -634,10 +704,10 @@ class Complaint(Base):
 
 
 # ============================================================================
-# 4. COMPLAINT UPVOTE MODEL
+# 4. GRIEVANCE UPVOTE MODEL (Standardized Domain Entity, Table: complaint_upvotes)
 # ============================================================================
 
-class ComplaintUpvote(Base):
+class GrievanceUpvote(Base):
     """Student peer upvotes endorsing campus grievances."""
     __tablename__ = "complaint_upvotes"
 
@@ -657,10 +727,30 @@ class ComplaintUpvote(Base):
     )
 
     # Relationships
-    complaint: Mapped["Complaint"] = relationship("Complaint", back_populates="upvotes")
+    grievance: Mapped["Grievance"] = relationship("Grievance", back_populates="upvotes")
+
+    @property
+    def complaint(self) -> "Grievance":
+        return self.grievance
     user: Mapped["User"] = relationship("User", back_populates="upvotes")
 
     # TypeScript camelCase parity properties
+    @property
+    def grievanceId(self) -> str:
+        return self.complaint_id
+
+    @grievanceId.setter
+    def grievanceId(self, val: str) -> None:
+        self.complaint_id = val
+
+    @property
+    def grievance_id(self) -> str:
+        return self.complaint_id
+
+    @grievance_id.setter
+    def grievance_id(self, val: str) -> None:
+        self.complaint_id = val
+
     @property
     def complaintId(self) -> str:
         return self.complaint_id
@@ -688,6 +778,8 @@ class ComplaintUpvote(Base):
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "grievanceId": self.complaint_id,
+            "grievance_id": self.complaint_id,
             "complaintId": self.complaint_id,
             "complaint_id": self.complaint_id,
             "userId": self.user_id,
@@ -695,6 +787,13 @@ class ComplaintUpvote(Base):
             "createdAt": self.createdAt,
             "created_at": self.createdAt,
         }
+
+
+# Backward-compatibility domain aliases
+Complaint = Grievance
+Grievance = Complaint
+ComplaintUpvote = GrievanceUpvote
+GrievanceUpvote = ComplaintUpvote
 
 
 # ============================================================================
@@ -1001,7 +1100,8 @@ class OtpSession(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    otp_code: Mapped[str] = mapped_column(String(8), nullable=False)
+    otp_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    otp_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=func.now(), server_default=func.now(), nullable=False
     )
@@ -1018,12 +1118,20 @@ class OtpSession(Base):
 
     # TypeScript camelCase parity properties
     @property
-    def otpCode(self) -> str:
+    def otpCode(self) -> Optional[str]:
         return self.otp_code
 
     @otpCode.setter
-    def otpCode(self, val: str) -> None:
+    def otpCode(self, val: Optional[str]) -> None:
         self.otp_code = val
+
+    @property
+    def otpHash(self) -> Optional[str]:
+        return self.otp_hash
+
+    @otpHash.setter
+    def otpHash(self, val: Optional[str]) -> None:
+        self.otp_hash = val
 
     @property
     def createdAt(self) -> str:
@@ -1055,6 +1163,8 @@ class OtpSession(Base):
             "email": self.email,
             "otpCode": self.otp_code,
             "otp_code": self.otp_code,
+            "otpHash": self.otp_hash,
+            "otp_hash": self.otp_hash,
             "createdAt": self.createdAt,
             "created_at": self.createdAt,
             "expiresAt": self.expiresAt,
@@ -1075,7 +1185,7 @@ Table(
     Base.metadata,
     Column("id", String(64), primary_key=True),
     Column("email", String(255), nullable=False),
-    Column("otp_code", String(8), nullable=False),
+    Column("otp_code", String(8), nullable=True),
     Column("created_at", DateTime(timezone=True), default=func.now()),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("is_used", Boolean, default=False),
@@ -1083,9 +1193,216 @@ Table(
     extend_existing=True,
 )
 
+
+# ============================================================================
+# 9. VISAI LABS GTM SUITE: WEBHOOK MODELS
+# ============================================================================
+
+class WebhookConfig(Base):
+    """Dynamic outbound webhook registration for platform alerting."""
+    __tablename__ = "webhook_configs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    platform: Mapped[str] = mapped_column(
+        String(32), default="custom", server_default="custom", nullable=False
+    )
+    secret_header: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trigger_on_critical: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    trigger_on_duplicate_cluster: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), server_default=func.now(), nullable=False
+    )
+
+    deliveries: Mapped[List["WebhookDeliveryLog"]] = relationship(
+        "WebhookDeliveryLog",
+        back_populates="webhook",
+        cascade="all, delete-orphan",
+        foreign_keys="WebhookDeliveryLog.webhook_id",
+    )
+
+    # TypeScript camelCase parity properties
+    @property
+    def targetUrl(self) -> str:
+        return self.target_url
+
+    @targetUrl.setter
+    def targetUrl(self, val: str) -> None:
+        self.target_url = val
+
+    @property
+    def secretHeader(self) -> Optional[str]:
+        return self.secret_header
+
+    @secretHeader.setter
+    def secretHeader(self, val: Optional[str]) -> None:
+        self.secret_header = val
+
+    @property
+    def triggerOnCritical(self) -> bool:
+        return self.trigger_on_critical
+
+    @triggerOnCritical.setter
+    def triggerOnCritical(self, val: bool) -> None:
+        self.trigger_on_critical = val
+
+    @property
+    def triggerOnDuplicateCluster(self) -> bool:
+        return self.trigger_on_duplicate_cluster
+
+    @triggerOnDuplicateCluster.setter
+    def triggerOnDuplicateCluster(self, val: bool) -> None:
+        self.trigger_on_duplicate_cluster = val
+
+    @property
+    def isActive(self) -> bool:
+        return self.is_active
+
+    @isActive.setter
+    def isActive(self, val: bool) -> None:
+        self.is_active = val
+
+    @property
+    def createdAt(self) -> str:
+        return self.created_at.isoformat() if self.created_at else ""
+
+    @createdAt.setter
+    def createdAt(self, val: Any) -> None:
+        self.created_at = _parse_iso_datetime(val)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "targetUrl": self.target_url,
+            "target_url": self.target_url,
+            "platform": self.platform,
+            "secretHeader": self.secret_header,
+            "secret_header": self.secret_header,
+            "triggerOnCritical": self.trigger_on_critical,
+            "trigger_on_critical": self.trigger_on_critical,
+            "triggerOnDuplicateCluster": self.trigger_on_duplicate_cluster,
+            "trigger_on_duplicate_cluster": self.trigger_on_duplicate_cluster,
+            "isActive": self.is_active,
+            "is_active": self.is_active,
+            "createdAt": self.createdAt,
+            "created_at": self.createdAt,
+        }
+
+
+class WebhookDeliveryLog(Base):
+    """Historical and audit log of outbound webhook dispatches."""
+    __tablename__ = "webhook_delivery_logs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    webhook_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("webhook_configs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    grievance_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    payload_json: Mapped[Dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
+    response_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delivered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), server_default=func.now(), nullable=False, index=True
+    )
+
+    webhook: Mapped["WebhookConfig"] = relationship(
+        "WebhookConfig", back_populates="deliveries", foreign_keys=[webhook_id]
+    )
+
+    # TypeScript camelCase parity properties
+    @property
+    def webhookId(self) -> str:
+        return self.webhook_id
+
+    @webhookId.setter
+    def webhookId(self, val: str) -> None:
+        self.webhook_id = val
+
+    @property
+    def grievanceId(self) -> Optional[str]:
+        return self.grievance_id
+
+    @grievanceId.setter
+    def grievanceId(self, val: Optional[str]) -> None:
+        self.grievance_id = val
+
+    @property
+    def eventType(self) -> str:
+        return self.event_type
+
+    @eventType.setter
+    def eventType(self, val: str) -> None:
+        self.event_type = val
+
+    @property
+    def statusCode(self) -> Optional[int]:
+        return self.status_code
+
+    @statusCode.setter
+    def statusCode(self, val: Optional[int]) -> None:
+        self.status_code = val
+
+    @property
+    def payloadJson(self) -> Dict[str, Any]:
+        return self.payload_json
+
+    @payloadJson.setter
+    def payloadJson(self, val: Dict[str, Any]) -> None:
+        self.payload_json = val
+
+    @property
+    def responseBody(self) -> Optional[str]:
+        return self.response_body
+
+    @responseBody.setter
+    def responseBody(self, val: Optional[str]) -> None:
+        self.response_body = val
+
+    @property
+    def deliveredAt(self) -> str:
+        return self.delivered_at.isoformat() if self.delivered_at else ""
+
+    @deliveredAt.setter
+    def deliveredAt(self, val: Any) -> None:
+        self.delivered_at = _parse_iso_datetime(val)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "webhookId": self.webhook_id,
+            "webhook_id": self.webhook_id,
+            "grievanceId": self.grievance_id,
+            "grievance_id": self.grievance_id,
+            "eventType": self.event_type,
+            "event_type": self.event_type,
+            "statusCode": self.status_code,
+            "status_code": self.status_code,
+            "payloadJson": self.payload_json,
+            "payload_json": self.payload_json,
+            "responseBody": self.response_body,
+            "response_body": self.response_body,
+            "deliveredAt": self.deliveredAt,
+            "delivered_at": self.deliveredAt,
+        }
+
+
 __all__ = [
     "Department",
     "User",
+    "Grievance",
+    "GrievanceUpvote",
     "Complaint",
     "ComplaintUpvote",
     "CategoryRoutingRule",
@@ -1093,5 +1410,7 @@ __all__ = [
     "Notification",
     "OtpSession",
     "OtpCode",
+    "WebhookConfig",
+    "WebhookDeliveryLog",
     "_parse_iso_datetime",
 ]

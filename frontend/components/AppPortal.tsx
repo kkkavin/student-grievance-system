@@ -221,7 +221,7 @@ export function AppPortal() {
 
     // Trigger automated resolution notification
     try {
-      await fetch('/api/notifications/send', {
+      await fetch('/api/v1/notifications/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

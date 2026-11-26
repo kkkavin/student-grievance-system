@@ -5,10 +5,31 @@ Preserves exact parity with src/ml/complaintClassifier.ts and continuous_student
 Executes with sub-50ms latency (empirically < 0.1ms).
 """
 
+import asyncio
 from datetime import datetime, timezone
+import json
+import logging
 import math
+import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+try:
+    from backend.app.schemas.ai import TriageResult
+    from backend.app.core.config import settings
+except ImportError:
+    from app.schemas.ai import TriageResult
+    from app.core.config import settings
+
+try:
+    from groq import AsyncGroq, Groq
+    HAS_GROQ = True
+except ImportError:
+    HAS_GROQ = False
+    AsyncGroq = None
+    Groq = None
+
+logger = logging.getLogger("app.ml.classifier")
 
 # Supported Complaint Categories
 COMPLAINT_CATEGORIES = [
@@ -182,7 +203,7 @@ PROBLEM_REGEX = re.compile(
     r"\b(not|doesn't|doesnt|isn't|isnt|won't|wont|cannot|can't|cant|failed\s+to)\s+"
     r"(working|work|turn|turning|start|starting|cool|cooling|load|loading|connect|connecting|open|opening|"
     r"power|powering|switch|switching|running|run|functioning|function|operational|close|boot|booting|"
-    r"respond|responding|released?|resolving|resolve|attend|attending)\b",
+    r"respond|responding|released?|resolving|resolve|attend|attending|generat(ed|ing)?|receive(d)?|issuing|issued|credit(ed)?|update(d)?|updating)\b",
     re.IGNORECASE,
 )
 
@@ -547,3 +568,204 @@ def analyze_spam(
     student_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     return default_classifier.analyze_spam(text, category, student_type)
+
+
+ACTIONABLE_STEPS_BY_CATEGORY: Dict[str, List[str]] = {
+    "Plumbing & Water": [
+        "Dispatch plumbing technician to inspect water line, valves, and fixtures.",
+        "Isolate supply valve if continuous leakage or flooding is detected.",
+        "Verify water pressure restored and log resolution in facility registry.",
+    ],
+    "Electrical & AC": [
+        "Assign certified electrician to test circuit breaker, switchboard, and voltage.",
+        "Replace faulty wiring, fixture, or capacitor to eliminate electrical hazard.",
+        "Inspect electrical panel and record clearance inspection report.",
+    ],
+    "Hostel Wi-Fi & Internet": [
+        "Check local corridor access point status, signal strength, and gateway latency.",
+        "Perform remote power-cycle on network switch port or access point.",
+        "Verify captive portal authentication and DNS resolution with campus NOC.",
+    ],
+    "Food & Mess": [
+        "Inspect mess kitchen cleanliness, cooking temperature, and raw ingredient storage.",
+        "Review food sample quality with hostel catering and student mess committee.",
+        "Issue corrective action notice to catering contractor with 24-hour compliance deadline.",
+    ],
+    "Damages & Repairs": [
+        "Conduct on-site physical inspection of reported carpentry/furniture damage.",
+        "Schedule maintenance team for immediate hardware replacement or structural repair.",
+        "Confirm repair quality and obtain student sign-off upon completion.",
+    ],
+    "Cleanliness & Sanitation": [
+        "Dispatch housekeeping supervisor to inspect sanitation and waste disposal in area.",
+        "Execute deep cleaning, disinfection, and pest control treatment as required.",
+        "Update daily sanitation inspection checklist and monitor area maintenance.",
+    ],
+    "Bus & Transport": [
+        "Notify campus transport coordinator and inspect vehicle schedule adherence.",
+        "Check bus maintenance log, GPS tracking, and route capacity allocation.",
+        "Issue route advisory or deploy backup transport shuttle if needed.",
+    ],
+    "Canteen & Cafeteria": [
+        "Audit cafeteria pricing against approved campus rate card and MRP guidelines.",
+        "Inspect food preparation area hygiene and verify POS billing systems.",
+        "Review vendor service agreement and address student feedback with manager.",
+    ],
+    "Classroom & Lab Facilities": [
+        "Dispatch AV/IT technician to test projector, smartboard, and audio equipment.",
+        "Check laboratory hardware, software licenses, and workstation connectivity.",
+        "Provide interim equipment swap if hardware replacement is required.",
+    ],
+    "Library & Wi-Fi": [
+        "Verify library catalog database, RFID gates, and digital resource access.",
+        "Check library reading room Wi-Fi access points and bandwidth allocation.",
+        "Coordinate with chief librarian for book inventory or quiet zone enforcement.",
+    ],
+    "Campus Cleanliness": [
+        "Deploy campus groundskeeping crew to clear waste, debris, and fallen vegetation.",
+        "Inspect outdoor trash bins, recycling stations, and drainage pathways.",
+        "Schedule periodic maintenance sweep across common campus corridors.",
+    ],
+    "Administrative & Fees": [
+        "Review student administrative file and verify fee transaction or document status.",
+        "Escalate record discrepancy to academic registrar or finance desk.",
+        "Issue updated acknowledgment receipt or clearance certificate to student.",
+    ],
+    "Ragging & Harassment": [
+        "Immediately alert Anti-Ragging Cell, Proctor Office, and Chief Hostel Warden.",
+        "Ensure student physical safety, guarantee strict confidentiality, and provide counseling.",
+        "Initiate formal inquiry under campus disciplinary safety regulations.",
+    ],
+    "Others": [
+        "Acknowledge grievance and route to designated department nodal officer.",
+        "Conduct preliminary assessment within standard campus SLA window.",
+        "Communicate resolution timeline and updates to student reporter.",
+    ],
+}
+
+
+def local_heuristic_fallback(
+    text: str,
+    student_type: Optional[str] = None,
+    category: Optional[Any] = None,
+) -> TriageResult:
+    """
+    3-Stage deterministic local heuristic fallback.
+    Executes in <0.5ms SLA.
+    Vetoes off-campus venues with is_valid_grievance=False, rejection_reason='OFF_CAMPUS_DOMAIN'.
+    Accepts campus concerns including interpersonal safety (bullying, ragging, harassment).
+    Generates 1-sentence intent_summary and 2-3 realistic actionable_steps.
+    """
+    ctx = category if isinstance(category, dict) else ({"category": category} if category else None)
+    res = default_classifier.classify_complaint(text, student_type, ctx)
+
+    if not res["isValidComplaint"]:
+        reason = res["rejectionReason"] or "INVALID_SUBMISSION"
+        return TriageResult(
+            is_valid_grievance=False,
+            rejection_reason=reason,
+            category="Others",
+            department_id="dept-hostel-admin",
+            urgency="LOW",
+            confidence=0.0,
+            intent_summary=f"Submission rejected: {reason}.",
+            actionable_steps=["Verify submission pertains to campus facilities or student life."],
+        )
+
+    cat = res["category"] or "Others"
+    dept_id = res["departmentId"] or CATEGORY_DEPARTMENT_MAP_10.get(cat, "dept-hostel-admin")
+
+    # Urgency Mapping
+    if res["isUrgent"] or res["priority"] == "urgent" or cat == "Ragging & Harassment":
+        urgency = "CRITICAL"
+    elif res["priority"] == "high":
+        urgency = "HIGH"
+    elif res["priority"] == "medium":
+        urgency = "MEDIUM"
+    else:
+        urgency = "LOW"
+
+    # Build 1-sentence intent summary
+    trimmed = " ".join(text.strip().split())
+    first_clause = trimmed.split(".")[0].strip()
+    if len(first_clause) > 95:
+        first_clause = first_clause[:92].rstrip() + "..."
+    intent_summary = f"Student reports {cat.lower()} concern: {first_clause}."
+
+    steps = list(ACTIONABLE_STEPS_BY_CATEGORY.get(cat, ACTIONABLE_STEPS_BY_CATEGORY["Others"]))
+
+    return TriageResult(
+        is_valid_grievance=True,
+        rejection_reason=None,
+        category=cat,
+        department_id=dept_id,
+        urgency=urgency,
+        confidence=float(res["confidence"]),
+        intent_summary=intent_summary,
+        actionable_steps=steps,
+    )
+
+
+GROQ_SYSTEM_PROMPT = """You are the official Campus Grievance Triage AI for university operations.
+Analyze the student submission and respond strictly in valid JSON matching this schema:
+{
+  "is_valid_grievance": bool,
+  "rejection_reason": string or null,
+  "category": string (must be one of: "Plumbing & Water", "Electrical & AC", "Hostel Wi-Fi & Internet", "Food & Mess", "Damages & Repairs", "Cleanliness & Sanitation", "Bus & Transport", "Canteen & Cafeteria", "Classroom & Lab Facilities", "Library & Wi-Fi", "Campus Cleanliness", "Administrative & Fees", "Ragging & Harassment", "Others"),
+  "department_id": string (e.g. "dept-infra", "dept-it", "dept-mess", "dept-hostel", "dept-transport", "dept-academics", "dept-accounts", "dept-security"),
+  "urgency": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+  "confidence": float between 0.0 and 1.0,
+  "intent_summary": "1 concise sentence summarizing the core grievance",
+  "actionable_steps": ["step 1", "step 2", "step 3"]
+}
+
+STRICT TRIAGE RULES:
+1. Off-Campus Venues: If the submission concerns commercial cinemas/theaters, shopping malls, food delivery apps (Swiggy/Zomato), commercial flights/trains, private off-campus flats, cryptocurrencies, or video games: set "is_valid_grievance": false, "rejection_reason": "OFF_CAMPUS_DOMAIN", "category": "Others", "urgency": "LOW".
+2. Greetings/Gibberish: Reject with "NOT_A_COMPLAINT" or "GIBBERISH".
+3. Campus Safety: Issues of ragging, bullying, harassment, intimidation, stalking, blackmail, extortion, or mental distress are ALWAYS valid campus grievances ("is_valid_grievance": true, "category": "Ragging & Harassment", "urgency": "CRITICAL").
+4. Campus Infrastructure & Facilities: Hazards like active fire, severe water burst/flooding, sparking electrical wires are "CRITICAL".
+"""
+
+
+async def classify_with_groq(
+    text: str,
+    student_type: Optional[str] = None,
+    category: Optional[Any] = None,
+    api_key: Optional[str] = None,
+) -> TriageResult:
+    """
+    LLM Triage using Groq llama-3.3-70b-versatile with JSON response format.
+    Includes a 3.5-second timeout and exception guard.
+    Seamlessly falls back to local_heuristic_fallback if GROQ_API_KEY is missing, invalid, or call times out.
+    """
+    key = api_key or getattr(settings, "groq_api_key", None) or os.getenv("GROQ_API_KEY")
+
+    # If key is absent, dummy, or groq SDK unavailable, immediately use deterministic local fallback
+    if not key or not HAS_GROQ or str(key).strip() in ("", "None") or str(key).startswith("gsk_dummy") or len(str(key).strip()) < 15:
+        return local_heuristic_fallback(text, student_type, category)
+
+    async def _call_groq_api() -> TriageResult:
+        client = AsyncGroq(api_key=str(key).strip(), timeout=3.0)
+        user_content = f"Text: {text}\nStudent Type: {student_type or 'General'}\nCategory Hint: {category or 'None'}"
+
+        chat_completion = await client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": GROQ_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        content = chat_completion.choices[0].message.content
+        data = json.loads(content)
+        return TriageResult.model_validate(data)
+
+    try:
+        return await asyncio.wait_for(_call_groq_api(), timeout=3.5)
+    except Exception as exc:
+        logger.warning(
+            f"Groq triage failed ({type(exc).__name__}: {exc}); seamlessly engaging local heuristic fallback."
+        )
+        return local_heuristic_fallback(text, student_type, category)
+

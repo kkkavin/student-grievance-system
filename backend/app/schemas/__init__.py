@@ -1,6 +1,6 @@
 """Pydantic v2 schemas for campus grievance system."""
-from app.schemas.common import APIResponse, ErrorResponse
-from app.schemas.auth import (
+from .common import APIResponse, ErrorResponse
+from .auth import (
     JWTPayload,
     UserProfile,
     LoginRequest,
@@ -8,9 +8,17 @@ from app.schemas.auth import (
     LoginResponse,
     RegisterRequest,
     SendOTPRequest,
+    RequestOTPRequest,
+    RequestOTPResponse,
     VerifyOTPRequest,
+    VerifyOTPResponse,
 )
-from app.schemas.complaints import (
+from .grievance import (
+    GrievanceCreate,
+    GrievanceUpdate,
+    GrievanceStatusPatch,
+    GrievanceResponse,
+    Grievance,
     ComplaintCreate,
     ComplaintUpdate,
     ResolveRequest,
@@ -21,31 +29,48 @@ from app.schemas.complaints import (
     DetachRequest,
     ReassignRequest,
     RequestReassignRequest,
+    MatchCandidate,
+    DeduplicationResult,
+    TriageGrievance,
+    TriageQueueResponse,
 )
-from app.schemas.departments import (
+from .departments import (
     DepartmentCreate,
     DepartmentUpdate,
     CategoryRoutingRuleCreate,
     CategoryRoutingRuleUpdate,
     AssignDepartmentRequest,
 )
-from app.schemas.analytics import (
+from .analytics import (
     HostelBlockRollup,
     TransportRouteRollup,
     CalendarMultipliers,
     ZoneRiskForecast,
     RiskForecastResponse,
+    DepartmentSlaMetric,
+    AutoTriageRateMetric,
+    DuplicatesInterceptedMetric,
+    WebhookDeliveries24hMetric,
+    AutomationSlaResponse,
 )
-from app.schemas.ai import (
+from .webhooks import (
+    WebhookConfigCreate,
+    WebhookConfigUpdate,
+    WebhookConfigResponse,
+    WebhookPayloadSchema,
+    WebhookDeliveryLogResponse,
+    WebhookTestResponse,
+)
+from .ai import (
     ClassifyComplaintRequest,
     ClassifyComplaintResponse,
     MLModelInfoResponse,
 )
-from app.schemas.notifications import (
+from .notifications import (
     NotificationSendRequest,
     NotificationItem,
 )
-from app.schemas.users import (
+from .users import (
     ChangePasswordRequest,
     UserUpsertRequest,
 )
@@ -60,7 +85,15 @@ __all__ = [
     "LoginResponse",
     "RegisterRequest",
     "SendOTPRequest",
+    "RequestOTPRequest",
+    "RequestOTPResponse",
     "VerifyOTPRequest",
+    "VerifyOTPResponse",
+    "GrievanceCreate",
+    "GrievanceUpdate",
+    "GrievanceStatusPatch",
+    "GrievanceResponse",
+    "Grievance",
     "ComplaintCreate",
     "ComplaintUpdate",
     "ResolveRequest",
@@ -71,6 +104,10 @@ __all__ = [
     "DetachRequest",
     "ReassignRequest",
     "RequestReassignRequest",
+    "MatchCandidate",
+    "DeduplicationResult",
+    "TriageGrievance",
+    "TriageQueueResponse",
     "DepartmentCreate",
     "DepartmentUpdate",
     "CategoryRoutingRuleCreate",
@@ -81,6 +118,17 @@ __all__ = [
     "CalendarMultipliers",
     "ZoneRiskForecast",
     "RiskForecastResponse",
+    "DepartmentSlaMetric",
+    "AutoTriageRateMetric",
+    "DuplicatesInterceptedMetric",
+    "WebhookDeliveries24hMetric",
+    "AutomationSlaResponse",
+    "WebhookConfigCreate",
+    "WebhookConfigUpdate",
+    "WebhookConfigResponse",
+    "WebhookPayloadSchema",
+    "WebhookDeliveryLogResponse",
+    "WebhookTestResponse",
     "ClassifyComplaintRequest",
     "ClassifyComplaintResponse",
     "MLModelInfoResponse",

@@ -16,9 +16,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from backend.main import app
-from backend.db.session import get_db_session
-from backend.db.models import User, Department, Complaint
+from backend.app.main import app
+from backend.app.db.session import get_db_session
+from backend.app.db.models import User, Department, Complaint
 from backend.app.core.security import (
     sign_token,
     verify_token,

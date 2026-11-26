@@ -16,6 +16,8 @@ try:
         compute_risk_forecast,
         get_campus_risk_forecast,
     )
+    from backend.app.services.email_service import send_status_update_email
+    from backend.app.services.webhook_service import dispatch_webhook_alert
 except ImportError:
     from app.services.analytics import (
         compute_hostel_maintenance_rollup,
@@ -33,6 +35,8 @@ except ImportError:
         compute_risk_forecast,
         get_campus_risk_forecast,
     )
+    from app.services.email_service import send_status_update_email
+    from app.services.webhook_service import dispatch_webhook_alert
 
 __all__ = [
     "compute_hostel_maintenance_rollup",
@@ -47,4 +51,6 @@ __all__ = [
     "get_zone_recommendation",
     "compute_risk_forecast",
     "get_campus_risk_forecast",
+    "send_status_update_email",
+    "dispatch_webhook_alert",
 ]

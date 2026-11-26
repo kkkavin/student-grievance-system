@@ -37,8 +37,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, StudentType } from '../types';
 import { HOSTEL_BLOCKS, DEPARTMENT_OPTIONS } from '../data/constants';
-import { loginUserApi, registerUserApi, adminLoginApi } from '../lib/api';
-import { sendOTPEmail, verifyOTPEmail } from '../services/sendEmailOTP';
+import { loginUserApi, registerUserApi, adminLoginApi, sendOtpApi, verifyOtpApi } from '../lib/api';
 
 export interface DemoAccount {
   name: string;
@@ -453,17 +452,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      const result = await sendOTPEmail({
-        email: cleanEmail,
-        name: cleanName,
-        regNo: cleanRegNo,
-      });
+      const result = await sendOtpApi(cleanEmail);
 
       if (result.success) {
         setEnteredOtp('');
         setStep('otp');
         setCooldownSeconds(30);
-        setOtpSentMessage(result.message || `Verification code sent to ${cleanEmail}. (Dev OTP: 123456)`);
+        setOtpSentMessage(result.message || `Verification code sent to ${cleanEmail}.`);
       } else {
         setStudentError(result.message || 'Failed to dispatch verification OTP.');
       }
@@ -492,7 +487,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      const verifyResult = await verifyOTPEmail(cleanEmail, cleanOtp);
+      const verifyResult = await verifyOtpApi(cleanEmail, cleanOtp);
       if (!verifyResult.success) {
         setStudentError(verifyResult.message || 'Invalid or expired OTP code.');
         setLoading(false);

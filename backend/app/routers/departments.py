@@ -25,7 +25,8 @@ except ImportError:
 router = APIRouter(tags=["Departments"])
 
 
-@router.get("/api/departments")
+@router.get("/api/v1/departments")
+@router.get("/api/departments", include_in_schema=False)
 async def get_departments(db: AsyncSession = Depends(get_db_session)):
     stmt = select(Department).where(Department.is_active == True)
     result = await db.execute(stmt)
@@ -33,7 +34,8 @@ async def get_departments(db: AsyncSession = Depends(get_db_session)):
     return [dept.to_dict() for dept in departments]
 
 
-@router.get("/api/admin/departments")
+@router.get("/api/v1/admin/departments")
+@router.get("/api/admin/departments", include_in_schema=False)
 async def get_admin_departments(
     onlyActive: bool = Query(False),
     user: Dict[str, Any] = Depends(require_super_admin),
@@ -47,7 +49,8 @@ async def get_admin_departments(
     return {"success": True, "departments": [dept.to_dict() for dept in departments]}
 
 
-@router.post("/api/admin/departments")
+@router.post("/api/v1/admin/departments")
+@router.post("/api/admin/departments", include_in_schema=False)
 async def create_department(
     request: Request,
     user: Dict[str, Any] = Depends(require_super_admin),
@@ -99,7 +102,8 @@ async def create_department(
     return {"success": True, "department": dept.to_dict()}
 
 
-@router.put("/api/admin/departments/{dept_id}")
+@router.put("/api/v1/admin/departments/{dept_id}")
+@router.put("/api/admin/departments/{dept_id}", include_in_schema=False)
 async def update_department(
     dept_id: str,
     request: Request,
@@ -141,7 +145,8 @@ async def update_department(
     return {"success": True, "department": dept.to_dict()}
 
 
-@router.get("/api/admin/routing-rules")
+@router.get("/api/v1/admin/routing-rules")
+@router.get("/api/admin/routing-rules", include_in_schema=False)
 async def get_routing_rules(
     user: Dict[str, Any] = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db_session),
@@ -152,7 +157,8 @@ async def get_routing_rules(
     return {"success": True, "rules": [r.to_dict() for r in rules]}
 
 
-@router.post("/api/admin/routing-rules")
+@router.post("/api/v1/admin/routing-rules")
+@router.post("/api/admin/routing-rules", include_in_schema=False)
 async def create_routing_rule(
     request: Request,
     user: Dict[str, Any] = Depends(require_super_admin),
@@ -197,7 +203,8 @@ async def create_routing_rule(
     return {"success": True, "rule": rule.to_dict()}
 
 
-@router.put("/api/admin/routing-rules/{rule_id}")
+@router.put("/api/v1/admin/routing-rules/{rule_id}")
+@router.put("/api/admin/routing-rules/{rule_id}", include_in_schema=False)
 async def update_routing_rule(
     rule_id: str,
     request: Request,
@@ -243,7 +250,8 @@ async def update_routing_rule(
     return {"success": True, "rule": rule.to_dict()}
 
 
-@router.delete("/api/admin/routing-rules/{rule_id}")
+@router.delete("/api/v1/admin/routing-rules/{rule_id}")
+@router.delete("/api/admin/routing-rules/{rule_id}", include_in_schema=False)
 async def delete_routing_rule(
     rule_id: str,
     user: Dict[str, Any] = Depends(require_super_admin),
@@ -271,7 +279,8 @@ async def delete_routing_rule(
     return {"success": True, "message": "Routing rule deleted successfully"}
 
 
-@router.post("/api/admin/users/assign-department")
+@router.post("/api/v1/admin/users/assign-department")
+@router.post("/api/admin/users/assign-department", include_in_schema=False)
 async def assign_user_department(
     request: Request,
     user: Dict[str, Any] = Depends(require_super_admin),

@@ -6,11 +6,14 @@ atomic parent-child clustering, and cascading resolution.
 """
 
 from datetime import datetime, timezone, timedelta
+import logging
 import math
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger("app.ml.deduplication")
 
 VECTOR_DIMENSION = 384
 AUTO_MERGE_THRESHOLD = 0.92
@@ -126,6 +129,143 @@ def generate_embedding_vector(
         return [float(x / norm) for x in vec]
     vec[0] = 1.0
     return vec
+
+
+class EmbeddingService:
+    """
+    Lazy singleton embedding service.
+    Attempts loading sentence_transformers.SentenceTransformer("all-MiniLM-L6-v2").
+    Automatically falls back to deterministic 384-dimensional n-gram/TF-IDF vectorizer if
+    sentence-transformers is uninstalled, unavailable, or offline.
+    """
+    _instance: Optional["EmbeddingService"] = None
+
+    def __init__(self):
+        self._model = None
+        self._model_load_attempted = False
+        self._use_sentence_transformers = False
+
+    @classmethod
+    def get_instance(cls) -> "EmbeddingService":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def _load_model(self) -> None:
+        if self._model_load_attempted:
+            return
+        self._model_load_attempted = True
+        try:
+            from sentence_transformers import SentenceTransformer
+            self._model = SentenceTransformer("all-MiniLM-L6-v2")
+            self._use_sentence_transformers = True
+            logger.info("Successfully loaded SentenceTransformer('all-MiniLM-L6-v2')")
+        except Exception as exc:
+            logger.info(
+                f"sentence_transformers unavailable ({type(exc).__name__}). "
+                f"Using deterministic 384-d vectorizer fallback."
+            )
+            self._model = None
+            self._use_sentence_transformers = False
+
+    def compute_embedding(self, text: str) -> List[float]:
+        """Returns 384-dimensional L2-normalized float vector."""
+        self._load_model()
+        if self._use_sentence_transformers and self._model is not None:
+            try:
+                emb = self._model.encode(text, normalize_embeddings=True)
+                return [float(x) for x in emb.tolist()]
+            except Exception as exc:
+                logger.warning(f"sentence_transformers encode failed ({exc}), falling back to deterministic vectorizer.")
+        return generate_embedding_vector(text, dim=VECTOR_DIMENSION)
+
+    def compute_cosine_similarity(self, vec_a: List[float], vec_b: List[float]) -> float:
+        return compute_cosine_similarity(vec_a, vec_b)
+
+
+def compute_embedding(text: str) -> List[float]:
+    """Computes 384-dimensional vector embedding delegating to lazy singleton EmbeddingService."""
+    return EmbeddingService.get_instance().compute_embedding(text)
+
+
+async def find_semantic_duplicate(
+    new_text: str,
+    department_id: Optional[str],
+    db: AsyncSession,
+    threshold: float = 0.82,
+    new_ticket_meta: Optional[Dict[str, Any]] = None,
+) -> Optional[Any]:
+    """
+    Queries open/pending grievances in the same department and computes cosine similarity.
+    If similarity > threshold (0.82), returns matched parent grievance.
+    Automatically flattens transitive duplicates to root parent ticket.
+    """
+    try:
+        from backend.app.db.models import Grievance
+    except ImportError:
+        from app.db.models import Grievance
+
+    if not new_text or not new_text.strip():
+        return None
+
+    svc = EmbeddingService.get_instance()
+    new_vec = svc.compute_embedding(new_text)
+
+    # Exclude resolved/closed/rejected tickets
+    stmt = select(Grievance).where(
+        Grievance.status.not_in([
+            "resolved", "Resolved", "RESOLVED",
+            "closed", "Closed", "CLOSED",
+            "rejected", "Rejected", "REJECTED",
+        ])
+    )
+    if department_id:
+        stmt = stmt.where(Grievance.assigned_department_id == department_id)
+
+    res = await db.execute(stmt)
+    candidates = res.scalars().all()
+
+    best_match = None
+    best_sim = 0.0
+
+    for cand in candidates:
+        if new_ticket_meta:
+            cand_dict = cand.to_dict() if hasattr(cand, "to_dict") else {
+                "category": getattr(cand, "category", ""),
+                "hostel_block": getattr(cand, "hostel_block", ""),
+                "room_no": getattr(cand, "room_no", ""),
+                "location_tag": getattr(cand, "location_tag", ""),
+            }
+            if not check_location_adjacency(new_ticket_meta, cand_dict):
+                continue
+
+        cand_vec = cand.embedding
+        if not cand_vec or len(cand_vec) != VECTOR_DIMENSION:
+            cand_vec = svc.compute_embedding(cand.description or "")
+        sim = svc.compute_cosine_similarity(new_vec, cand_vec)
+        if sim > threshold and sim > best_sim:
+            best_sim = sim
+            best_match = cand
+
+    if best_match:
+        # Transitive duplicate flattening: traverse up to the root parent
+        root = best_match
+        visited = {root.id}
+        while root.duplicate_of_id or getattr(root, "master_case_id", None):
+            parent_id = root.duplicate_of_id or root.master_case_id
+            if not parent_id or parent_id in visited:
+                break
+            visited.add(parent_id)
+            p_res = await db.execute(select(Grievance).where(Grievance.id == parent_id))
+            parent_obj = p_res.scalar_one_or_none()
+            if parent_obj:
+                root = parent_obj
+            else:
+                break
+        setattr(root, "_similarity_score", best_sim)
+        return root
+
+    return None
 
 
 def compute_hybrid_similarity(

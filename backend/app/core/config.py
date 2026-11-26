@@ -54,6 +54,7 @@ class Settings(BaseSettings):
 
     # Optional External Integrations
     gemini_api_key: Optional[str] = Field(default=None, alias="GEMINI_API_KEY")
+    groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
     gmail_user: Optional[str] = Field(default=None, alias="GMAIL_USER")
     gmail_app_password: Optional[str] = Field(default=None, alias="GMAIL_APP_PASSWORD")
 

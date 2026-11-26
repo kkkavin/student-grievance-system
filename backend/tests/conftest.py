@@ -11,10 +11,12 @@ import sys
 from pathlib import Path
 from typing import AsyncGenerator
 
-# Ensure project root is in sys.path for backend package discovery
+# Ensure project root and backend dir are in sys.path for package discovery
 project_root = str(Path(__file__).resolve().parent.parent.parent)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+backend_dir = str(Path(__file__).resolve().parent.parent)
+for _p in (project_root, backend_dir):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import pytest
 import pytest_asyncio
@@ -27,12 +29,18 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy import text
 from httpx import AsyncClient, ASGITransport
 
-from backend.config import get_settings
-from backend.db.base import Base
-from backend.db.seed import seed_database
+from backend.app.core.config import get_settings
+from backend.app.db.session import (
+    Base,
+    is_postgres_listening,
+    get_db as app_get_db,
+    get_db_session as app_get_db_session,
+)
+from backend.app.db.seed import seed_database
+from backend.app.core.security import sign_token
 
 try:
-    from backend.main import app
+    from backend.app.main import app
 except ImportError:
     app = None
 
@@ -51,9 +59,11 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
     settings = get_settings()
     engine: AsyncEngine
 
-    if _postgres_reachable is not False:
+    if _postgres_reachable is None:
+        _postgres_reachable = is_postgres_listening(settings.database_url, timeout=0.15)
+
+    if _postgres_reachable:
         try:
-            # Quick probe to configured PostgreSQL instance with 1s timeout
             pg_engine = create_async_engine(
                 settings.database_url,
                 echo=False,
@@ -136,8 +146,8 @@ async def m2_seeded_session(db_session: AsyncSession) -> AsyncSession:
     Function-scoped database session pre-populated with Milestone 2 10-department operational seed data.
     """
     try:
-        from backend.app.db.seed import seed_database as seed_modern_db
-        await seed_modern_db(db_session, reset=False, include_historical=False)
+        from backend.app.db.seed import seed_database
+        await seed_database(db_session, reset=False, include_historical=False)
     except Exception as e:
         logger.warning(f"Modern seeding pass in fixture failed: {e}")
     await db_session.flush()
@@ -152,14 +162,11 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     if app is None:
         pytest.skip("FastAPI app not loaded (Milestone 2 deliverable)")
 
-    from backend.db.base import get_db
-    from backend.db.session import get_db_session
-
     async def override_get_db():
         yield db_session
 
-    app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_db_session] = override_get_db
+    app.dependency_overrides[app_get_db] = override_get_db
+    app.dependency_overrides[app_get_db_session] = override_get_db
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -172,3 +179,27 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 async def async_client(client: AsyncClient) -> AsyncClient:
     """Alias fixture for async_client."""
     return client
+
+
+@pytest.fixture
+def auth_headers() -> dict:
+    """Helper fixture providing valid Bearer token headers."""
+    token = sign_token({
+        "id": "test-student-1",
+        "email": "student1@campus.edu",
+        "role": "STUDENT",
+        "reg_no": "2023CSE042",
+        "name": "Test Student",
+    })
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def admin_headers() -> dict:
+    """Helper fixture providing valid Admin Bearer token headers."""
+    token = sign_token({
+        "id": "test-admin-1",
+        "email": "admin@campus.edu",
+        "role": "SUPER_ADMIN",
+    })
+    return {"Authorization": f"Bearer {token}"}

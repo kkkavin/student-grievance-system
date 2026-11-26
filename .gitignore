@@ -1,3 +1,4 @@
+# Dependencies & Build Artefacts
 node_modules/
 build/
 dist/
@@ -9,16 +10,18 @@ coverage/
 .env*
 !.env.example
 
-# Graphify
-graphify-out/cache/
-graphify-out/.*
-graphify-out/[0-9]*/
-graphify-out/cost.json
-!.graphify_root
+# Sensitive & Local Agent Artifacts
+CREDENTIALS.md
+.agents/
+session-handoff.md
+CLAUDE.md
+TEST_INFRA.md
+TEST_READY.md
+chats/
+graphify-out/
 
 # Tooling local configs
 .claude/
-.agents/teamwork/
 
 # Project report files
 *.pdf

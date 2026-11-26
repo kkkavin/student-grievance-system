@@ -19,7 +19,7 @@ except ImportError:
     from app.db.session import get_db_session
     from app.db.models import Notification
 
-router = APIRouter(prefix="/api/notifications", tags=["Notifications"])
+router = APIRouter()
 
 
 @router.post("/send")

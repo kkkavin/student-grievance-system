@@ -53,34 +53,19 @@ try:
         Notification,
         OtpSession,
     )
-    from backend.app.db.base import Base
-    from backend.app.db.session import AsyncSessionLocal, engine
+    from backend.app.db.session import Base, AsyncSessionLocal, engine
 except ImportError:
-    try:
-        from app.db.models import (
-            Department,
-            User,
-            Complaint,
-            ComplaintUpvote,
-            CategoryRoutingRule,
-            AuditLog,
-            Notification,
-            OtpSession,
-        )
-        from app.db.base import Base
-        from app.db.session import AsyncSessionLocal, engine
-    except ImportError:
-        from backend.db.models import (
-            Department,
-            User,
-            Complaint,
-            CategoryRoutingRule,
-            AuditLog,
-            Notification,
-            OtpCode as OtpSession,
-        )
-        from backend.db.base import Base, AsyncSessionLocal, engine
-        ComplaintUpvote = None
+    from app.db.models import (
+        Department,
+        User,
+        Complaint,
+        ComplaintUpvote,
+        CategoryRoutingRule,
+        AuditLog,
+        Notification,
+        OtpSession,
+    )
+    from app.db.session import Base, AsyncSessionLocal, engine
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -1278,6 +1263,15 @@ def get_seed_complaints() -> List[Dict[str, Any]]:
     ]
 
     return complaints
+
+
+# Compatibility aliases for test suites and domain migration
+get_seed_initial_complaints = get_seed_complaints
+get_seed_grievances = get_seed_complaints
+
+
+def build_historical_grievances(*args, **kwargs) -> List[Dict[str, Any]]:
+    return []
 
 
 # ============================================================================

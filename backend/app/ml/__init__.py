@@ -18,6 +18,10 @@ try:
         run_two_stage_deduplication,
         group_semantic_grievances,
         cascade_resolve_ticket_tree,
+        EmbeddingService,
+        compute_embedding,
+        compute_cosine_similarity,
+        find_semantic_duplicate,
     )
 except ImportError:
     from app.ml.classifier import (
@@ -38,6 +42,10 @@ except ImportError:
         run_two_stage_deduplication,
         group_semantic_grievances,
         cascade_resolve_ticket_tree,
+        EmbeddingService,
+        compute_embedding,
+        compute_cosine_similarity,
+        find_semantic_duplicate,
     )
 
 __all__ = [
@@ -48,6 +56,10 @@ __all__ = [
     "CATEGORY_ICONS",
     "CATEGORY_DEPARTMENT_MAP",
     "cosine_similarity",
+    "compute_cosine_similarity",
+    "EmbeddingService",
+    "compute_embedding",
+    "find_semantic_duplicate",
     "jaccard_similarity",
     "compute_hybrid_similarity",
     "evaluate_deduplication",

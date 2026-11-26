@@ -8,10 +8,10 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.main import app
-from backend.db.session import get_db_session
-from backend.db.models import Department, User, Complaint
-from backend.utils.jwt import sign_token
+from backend.app.main import app
+from backend.app.db.session import get_db_session
+from backend.app.db.models import Department, User, Complaint
+from backend.app.core.security import sign_token
 
 
 @pytest_asyncio.fixture

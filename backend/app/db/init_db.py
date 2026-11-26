@@ -28,12 +28,8 @@ try:
     from backend.app.db.session import engine, Base
     import backend.app.db.models  # noqa: F401
 except ImportError:
-    try:
-        from app.db.session import engine, Base
-        import app.db.models  # noqa: F401
-    except ImportError:
-        from backend.db.session import engine, Base
-        import backend.db.models  # noqa: F401
+    from app.db.session import engine, Base
+    import app.db.models  # noqa: F401
 
 logging.basicConfig(
     level=logging.INFO,

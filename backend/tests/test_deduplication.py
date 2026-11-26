@@ -15,14 +15,14 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from backend.ml.deduplication import (
+from backend.app.ml.deduplication import (
     cosine_similarity,
     jaccard_similarity,
     compute_hybrid_similarity,
     evaluate_deduplication,
     generate_embedding_vector,
 )
-from backend.db.models import Complaint, Notification, User
+from backend.app.db.models import Complaint, Notification, User
 from backend.app.core.security import sign_token
 
 
@@ -404,7 +404,7 @@ class TestLocationAdjacencyGuardrails:
         assert ticket_c.get("masterCaseId") is None
 
     def test_check_location_adjacency_key_compatibility(self):
-        from backend.ml.deduplication import check_location_adjacency
+        from backend.app.ml.deduplication import check_location_adjacency
 
         new_ticket_snake = {
             "hostel_block": "Block A",

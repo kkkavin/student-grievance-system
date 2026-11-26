@@ -32,6 +32,7 @@ import {
   TrendingUp,
   Layers,
   GitMerge,
+  Zap,
 } from 'lucide-react';
 import { Grievance, PriorityLevel, GrievanceStatus } from '@/types';
 import { groupSemanticGrievances, GroupedSemanticGrievance } from '@/lib/deduplication';
@@ -47,6 +48,7 @@ import { ReportDownloader } from './ReportDownloader';
 import { PredictiveAnalyticsDashboard } from './PredictiveAnalyticsDashboard';
 import { TriageModerationView } from './TriageModerationView';
 import { DepartmentManagement } from './DepartmentManagement';
+import { AIAutomationSlaPanel } from './AIAutomationSlaPanel';
 import { fetchTriageQueueApi, fetchDepartmentsApi, reassignGrievanceApi } from '@/lib/api';
 import { Department } from '@/types';
 
@@ -61,7 +63,7 @@ const ITEMS_PER_PAGE = 8;
 
 export type VisualType = 'bar' | 'horizontal_bar' | 'pie' | 'donut' | 'ledger';
 export type VisualDimension = 'category' | 'status' | 'priority' | 'residency';
-export type ActiveViewSection = 'queue' | 'triage' | 'analytics' | 'departments';
+export type ActiveViewSection = 'queue' | 'triage' | 'analytics' | 'departments' | 'automation_sla';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   grievances,
@@ -646,6 +648,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <Building className="w-3.5 h-3.5" />
             <span>Department Management</span>
           </button>
+
+          {/* Tab 5: VisAI Labs GTM Suite: AI Automation & SLA Performance */}
+          <button
+            id="toggle-view-automation-sla"
+            type="button"
+            onClick={() => setActiveViewSection('automation_sla')}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeViewSection === 'automation_sla'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+            title="VisAI Labs GTM Suite: AI Automation & Resolution SLA Performance"
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-300" />
+            <span>AI Automation & SLA</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-400/20 text-white font-bold">
+              GTM
+            </span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono px-2">
@@ -657,6 +678,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ? 'Triage Moderation'
               : activeViewSection === 'departments'
               ? 'Department Management'
+              : activeViewSection === 'automation_sla'
+              ? 'AI Automation & SLA Performance'
               : 'Predictive Analytics & Risk'}
           </span>
         </div>
@@ -1459,6 +1482,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* ========================================================================= */}
       {activeViewSection === 'departments' && (
         <DepartmentManagement />
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5B. VISAI LABS GTM SUITE: AI AUTOMATION & SLA PERFORMANCE PANEL           */}
+      {/* ========================================================================= */}
+      {activeViewSection === 'automation_sla' && (
+        <AIAutomationSlaPanel />
       )}
 
       {/* ========================================================================= */}

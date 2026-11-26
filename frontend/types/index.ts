@@ -383,4 +383,160 @@ export interface SendOtpResponse {
 export interface VerifyOtpResponse {
   success: boolean;
   message: string;
+  access_token?: string | null;
+  token?: string | null;
+  tokenType?: string;
+  user?: UserProfile | null;
+}
+
+// ============================================================================
+// VisAI Labs GTM Suite: Outbound Webhooks & SLA Analytics Types
+// ============================================================================
+
+export type WebhookPlatform = 'slack' | 'discord' | 'custom';
+
+export interface WebhookConfig {
+  id: string;
+  name: string;
+  target_url?: string;
+  targetUrl: string;
+  platform: WebhookPlatform | string;
+  secret_header?: string | null;
+  secretHeader?: string | null;
+  trigger_on_critical?: boolean;
+  triggerOnCritical: boolean;
+  trigger_on_duplicate_cluster?: boolean;
+  triggerOnDuplicateCluster: boolean;
+  is_active?: boolean;
+  isActive: boolean;
+  created_at?: string;
+  createdAt: string;
+}
+
+export interface WebhookCreateInput {
+  name: string;
+  targetUrl?: string;
+  target_url?: string;
+  platform?: WebhookPlatform | string;
+  secretHeader?: string | null;
+  secret_header?: string | null;
+  triggerOnCritical?: boolean;
+  trigger_on_critical?: boolean;
+  triggerOnDuplicateCluster?: boolean;
+  trigger_on_duplicate_cluster?: boolean;
+  isActive?: boolean;
+  is_active?: boolean;
+}
+
+export interface WebhookDeliveryLog {
+  id: string;
+  webhookId?: string;
+  webhook_id?: string;
+  grievanceId?: string | null;
+  grievance_id?: string | null;
+  eventType?: string;
+  event_type?: string;
+  statusCode?: number | null;
+  status_code?: number | null;
+  payloadJson?: Record<string, any>;
+  payload_json?: Record<string, any>;
+  responseBody?: string | null;
+  response_body?: string | null;
+  deliveredAt?: string;
+  delivered_at?: string;
+}
+
+export interface DepartmentSlaMetric {
+  departmentId: string;
+  department_id?: string;
+  departmentName: string;
+  department_name?: string;
+  departmentCode: string;
+  department_code?: string;
+  targetSlaHours: number;
+  target_sla_hours?: number;
+  avgResolutionHours: number;
+  avg_resolution_hours?: number;
+  complianceRate: number;
+  compliance_rate?: number;
+  totalTickets: number;
+  total_tickets?: number;
+  resolvedTickets: number;
+  resolved_tickets?: number;
+  activeTickets: number;
+  active_tickets?: number;
+  breachedTickets: number;
+  breached_tickets?: number;
+  status: 'COMPLIANT' | 'WARNING' | 'BREACHED' | string;
+}
+
+export interface AutoTriageRateMetrics {
+  autoTriagedPct: number;
+  auto_triaged_pct?: number;
+  ratePercentage?: number;
+  rate_percentage?: number;
+  accuracyPct: number;
+  accuracy_pct?: number;
+  accuracyPercentage?: number;
+  accuracy_percentage?: number;
+  totalTriaged: number;
+  total_triaged?: number;
+  totalGrievances?: number;
+  total_grievances?: number;
+  autoTriagedCount: number;
+  auto_triaged_count?: number;
+  manuallyReassignedCount: number;
+  manually_reassigned_count?: number;
+  avgConfidence: number;
+  avg_confidence?: number;
+}
+
+export interface DuplicatesInterceptedMetrics {
+  totalCount: number;
+  total_count?: number;
+  totalIntercepted?: number;
+  total_intercepted?: number;
+  hoursSavedEstimate: number;
+  hours_saved_estimate?: number;
+  hoursSaved?: number;
+  hours_saved?: number;
+  clustersIdentified: number;
+  clusters_identified?: number;
+  topCategories: Array<{ category: string; count: number }>;
+  top_categories?: Array<{ category: string; count: number }>;
+}
+
+export interface WebhookDeliveries24hMetrics {
+  count: number;
+  totalDeliveries?: number;
+  total_deliveries?: number;
+  successfulDeliveries: number;
+  successful_deliveries?: number;
+  successCount?: number;
+  success_count?: number;
+  failedDeliveries: number;
+  failed_deliveries?: number;
+  failureCount?: number;
+  failure_count?: number;
+  successRatePct: number;
+  success_rate_pct?: number;
+  criticalAlerts: number;
+  critical_alerts?: number;
+  duplicateClusters: number;
+  duplicate_clusters?: number;
+  alertTypes?: Record<string, number>;
+  alert_types?: Record<string, number>;
+}
+
+export interface AutomationSlaResponse {
+  departmentSlaMetrics: DepartmentSlaMetric[];
+  department_sla_metrics?: DepartmentSlaMetric[];
+  autoTriageRate: AutoTriageRateMetrics;
+  auto_triage_rate?: AutoTriageRateMetrics;
+  duplicatesIntercepted: DuplicatesInterceptedMetrics;
+  duplicates_intercepted?: DuplicatesInterceptedMetrics;
+  webhookDeliveries24h: WebhookDeliveries24hMetrics;
+  webhook_deliveries_24h?: WebhookDeliveries24hMetrics;
+  generatedAt: string;
+  generated_at?: string;
 }

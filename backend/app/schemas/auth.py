@@ -82,7 +82,33 @@ class SendOTPRequest(BaseModel):
     type: Optional[str] = "signup"
 
 
+class RequestOTPRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    email: str
+    name: Optional[str] = None
+    reg_no: Optional[str] = Field(default=None, alias="regNo")
+    type: Optional[str] = "signup"
+
+
+class RequestOTPResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    success: bool = True
+    message: str = "OTP sent successfully"
+    session_id: Optional[str] = Field(default=None, alias="sessionId")
+    expires_in: int = Field(default=300, alias="expiresIn")
+
+
 class VerifyOTPRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     email: str
     otp: str
+
+
+class VerifyOTPResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    success: bool = True
+    message: str = "OTP verified successfully"
+    access_token: Optional[str] = Field(default=None, alias="accessToken")
+    token: Optional[str] = None
+    token_type: str = Field(default="bearer", alias="tokenType")
+    user: Optional[UserProfile] = None

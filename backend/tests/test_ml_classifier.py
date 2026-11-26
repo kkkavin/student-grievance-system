@@ -10,7 +10,7 @@ Ports:
 
 import time
 import pytest
-from backend.ml.classifier import classify_complaint, ComplaintClassifier
+from backend.app.ml.classifier import classify_complaint, ComplaintClassifier
 
 
 HARASSMENT_CASES = [

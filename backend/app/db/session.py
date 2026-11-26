@@ -91,11 +91,7 @@ def get_database_url() -> str:
                 from app.core.config import get_settings
                 url = get_settings().database_url
             except ImportError:
-                try:
-                    from backend.config import get_settings
-                    url = get_settings().database_url
-                except ImportError:
-                    url = "postgresql+asyncpg://postgres:postgres@localhost:5432/campus_grievance_db"
+                url = "postgresql+asyncpg://postgres:postgres@localhost:5432/campus_grievance_db"
 
     # Normalize PostgreSQL URL scheme to asyncpg
     if url.startswith("postgresql://"):
@@ -105,7 +101,7 @@ def get_database_url() -> str:
     return url
 
 
-def is_postgres_listening(url: str, timeout: float = 0.5) -> bool:
+def is_postgres_listening(url: str, timeout: float = 0.15) -> bool:
     """Performs a non-blocking TCP socket probe to verify DB host and port."""
     try:
         parsed = make_url(url)
@@ -162,7 +158,7 @@ class DatabaseEngineManager:
             self._active_url = target_url
         else:
             # Target is PostgreSQL - perform fast probe
-            if is_postgres_listening(target_url, timeout=0.6):
+            if is_postgres_listening(target_url, timeout=0.15):
                 logger.info(f"[DB] PostgreSQL detected on target port. Initializing asyncpg engine.")
                 self._engine = create_async_engine(
                     target_url,

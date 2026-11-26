@@ -1,12 +1,14 @@
 """
 FastAPI Application Entry Point for Production AI Decoupled Architecture.
 FastAPI + Pydantic v2 + SQLAlchemy 2.0 Async + PostgreSQL 16 (pgvector) / SQLite Fallback.
+Provides canonical /api/v1/* primary endpoints with hidden /api/* backward-compatible aliases.
 """
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -16,7 +18,7 @@ try:
     from backend.app.routers import (
         health,
         auth,
-        complaints,
+        grievances,
         departments,
         analytics,
         ai,
@@ -25,13 +27,14 @@ try:
         users,
         graph,
     )
+    complaints = grievances
 except ImportError:
     from app.core.config import settings
     from app.db.session import init_db
     from app.routers import (
         health,
         auth,
-        complaints,
+        grievances,
         departments,
         analytics,
         ai,
@@ -40,6 +43,7 @@ except ImportError:
         users,
         graph,
     )
+    complaints = grievances
 
 
 @asynccontextmanager
@@ -82,7 +86,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"success": False, "error": "Validation error", "details": exc.errors()},
+        content={"success": False, "error": "Validation error", "details": jsonable_encoder(exc.errors())},
     )
 
 
@@ -94,24 +98,49 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Register Routers
-app.include_router(health.router)
-app.include_router(auth.router)
-
-# Dual-mounted complaints/grievances router
-app.include_router(complaints.router, prefix="/api/complaints", tags=["Complaints"])
-app.include_router(complaints.router, prefix="/api/grievances", tags=["Grievances (Legacy Alias)"])
-
-# Auxiliary service routers
+# ---------------------------------------------------------------------------
+# Primary v1 API Mounts (Published in OpenAPI)
+# ---------------------------------------------------------------------------
+app.include_router(grievances.router, prefix="/api/v1/grievances", tags=["Grievances"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(ai.router, prefix="/api/v1/ai", tags=["AI & Machine Learning"])
+app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Analytics"])
 app.include_router(departments.router)
-app.include_router(analytics.router)
-app.include_router(ai.router)
-app.include_router(notifications.router)
-app.include_router(audit.router)
-app.include_router(users.router)
+app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])
+app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
+app.include_router(audit.router, prefix="/api/v1/admin", tags=["Audit & Admin"])
+
+# Webhooks router (VisAI Labs GTM Suite: Outbound Webhooks)
+try:
+    from backend.app.routers import webhooks
+    app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["Webhooks"])
+    app.include_router(webhooks.router, prefix="/api/webhooks", include_in_schema=False)
+except ImportError:
+    try:
+        from app.routers import webhooks
+        app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["Webhooks"])
+        app.include_router(webhooks.router, prefix="/api/webhooks", include_in_schema=False)
+    except ImportError:
+        pass
+
+# Health & Knowledge Graph routers
+app.include_router(health.router)
 app.include_router(graph.router)
+
+# ---------------------------------------------------------------------------
+# Hidden Backward-Compatible Legacy Aliases (include_in_schema=False)
+# ---------------------------------------------------------------------------
+app.include_router(grievances.router, prefix="/api/grievances", include_in_schema=False)
+app.include_router(grievances.router, prefix="/api/complaints", include_in_schema=False)
+app.include_router(auth.router, prefix="/api/auth", include_in_schema=False)
+app.include_router(ai.router, prefix="/api/ai", include_in_schema=False)
+app.include_router(ai.router, include_in_schema=False)
+app.include_router(analytics.router, prefix="/api/analytics", include_in_schema=False)
+app.include_router(notifications.router, prefix="/api/notifications", include_in_schema=False)
+app.include_router(users.router, prefix="/api/users", include_in_schema=False)
+app.include_router(audit.router, prefix="/api/admin", include_in_schema=False)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=getattr(settings, "port", 8000), reload=True)
+    uvicorn.run("backend.app.main:app", host="0.0.0.0", port=getattr(settings, "port", 8000), reload=True)

@@ -102,3 +102,7 @@ def enforce_complaint_rlac(complaint: Any, user: Dict[str, Any]) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"success": False, "error": "Forbidden: Cannot access complaints belonging to other students"},
         )
+
+
+enforce_grievance_rlac = enforce_complaint_rlac
+

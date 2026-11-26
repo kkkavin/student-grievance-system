@@ -20,7 +20,7 @@ except ImportError:
     from app.core.security import verify_password, hash_password
     from app.routers.dependencies import get_current_user
 
-router = APIRouter(prefix="/api/users", tags=["Users"])
+router = APIRouter()
 
 
 @router.get("/{reg_no}")
@@ -33,7 +33,7 @@ async def get_user_by_reg_no(reg_no: str, db: AsyncSession = Depends(get_db_sess
     return user.to_dict()
 
 
-@router.post("")
+@router.post("/")
 async def create_or_upsert_user(request: Request, db: AsyncSession = Depends(get_db_session)):
     body = await request.json()
     reg_no = str(body.get("regNo") or body.get("reg_no") or "").strip().upper()

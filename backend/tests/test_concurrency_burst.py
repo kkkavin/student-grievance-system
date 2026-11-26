@@ -13,10 +13,9 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from backend.main import app
-from backend.db.base import get_db
-from backend.db.session import get_db_session
-from backend.db.models import Complaint, Department
+from backend.app.main import app
+from backend.app.db.session import get_db, get_db_session
+from backend.app.db.models import Complaint, Department
 
 
 @pytest.fixture

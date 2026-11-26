@@ -10,7 +10,7 @@ import math
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.db.models import (
+from backend.app.db.models import (
     Department,
     User,
     Complaint,

@@ -11,14 +11,14 @@ from datetime import datetime, timezone
 import pytest
 from httpx import AsyncClient
 
-from backend.services.analytics import (
+from backend.app.services.analytics import (
     compute_hostel_maintenance_rollup,
     compute_transport_rollup,
     compute_wifi_density_matrix,
     infer_issue_type,
     infer_transport_incident_type,
 )
-from backend.services.forecasting import (
+from backend.app.services.forecasting import (
     compute_risk_score,
     get_academic_calendar_factors,
 )

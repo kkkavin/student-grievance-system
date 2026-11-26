@@ -10,13 +10,13 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError, StatementError
 
-from backend.db.models import (
+from backend.app.db.models import (
     Department,
     User,
     Complaint,
     CategoryRoutingRule,
 )
-from backend.db.seed import generate_seed_embedding
+from backend.app.db.seed import generate_seed_embedding
 
 
 # ============================================================================

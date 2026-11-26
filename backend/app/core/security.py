@@ -14,10 +14,7 @@ import bcrypt
 try:
     from backend.app.core.config import settings
 except ImportError:
-    try:
-        from app.core.config import settings
-    except ImportError:
-        from backend.config import settings
+    from app.core.config import settings
 
 DEFAULT_SECRET = settings.jwt_secret
 DEFAULT_EXPIRES_IN = settings.jwt_expiration_seconds

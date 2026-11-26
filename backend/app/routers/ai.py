@@ -1,22 +1,65 @@
 """
 FastAPI AI & Machine Learning Classification Router.
-Sub-50ms inference, campus gatekeeper, OOD veto, and model info.
+Sub-50ms inference, campus gatekeeper, OOD veto, Groq LLM Triage Agent, and model info.
 """
 
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 try:
-    from backend.app.ml.classifier import classify_complaint
+    from backend.app.ml.classifier import (
+        classify_complaint,
+        local_heuristic_fallback,
+        classify_with_groq,
+    )
+    from backend.app.schemas.ai import (
+        TriageRequest,
+        TriageResult,
+        ClassifyComplaintRequest,
+        ClassifyComplaintResponse,
+        MLModelInfoResponse,
+    )
 except ImportError:
-    from app.ml.classifier import classify_complaint
+    from app.ml.classifier import (
+        classify_complaint,
+        local_heuristic_fallback,
+        classify_with_groq,
+    )
+    from app.schemas.ai import (
+        TriageRequest,
+        TriageResult,
+        ClassifyComplaintRequest,
+        ClassifyComplaintResponse,
+        MLModelInfoResponse,
+    )
 
-router = APIRouter(prefix="/api/ai", tags=["AI & Machine Learning"])
+router = APIRouter()
+
+
+@router.post("/triage", response_model=TriageResult)
+async def ai_triage_endpoint(payload: TriageRequest):
+    """
+    Structured Groq LLM Triage Agent endpoint.
+    Processes grievance text via Groq llama-3.3-70b-versatile with 3.5s timeout.
+    Seamlessly falls back to local heuristic if key is missing/invalid or times out.
+    """
+    text = payload.text.strip() if payload.text else ""
+    if not text:
+        raise HTTPException(status_code=400, detail="Grievance text is required")
+
+    return await classify_with_groq(
+        text=text,
+        student_type=payload.student_type,
+        category=payload.category,
+    )
 
 
 @router.post("/classify-complaint")
 async def classify_complaint_endpoint(request: Request):
+    """
+    Legacy complaint classification endpoint preserved for backward compatibility.
+    """
     body = await request.json()
     text = body.get("text")
     if not text or not isinstance(text, str):
@@ -63,3 +106,4 @@ async def get_ml_model_info():
         "latencyProfile": "<5ms (In-Memory Python AST)",
         "status": "OPERATIONAL",
     }
+

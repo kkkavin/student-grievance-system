@@ -3,7 +3,7 @@ try:
     from backend.app.routers import (
         health,
         auth,
-        complaints,
+        grievances,
         departments,
         analytics,
         ai,
@@ -12,11 +12,12 @@ try:
         users,
         graph,
     )
+    complaints = grievances
 except ImportError:
     from app.routers import (
         health,
         auth,
-        complaints,
+        grievances,
         departments,
         analytics,
         ai,
@@ -25,10 +26,12 @@ except ImportError:
         users,
         graph,
     )
+    complaints = grievances
 
 __all__ = [
     "health",
     "auth",
+    "grievances",
     "complaints",
     "departments",
     "analytics",

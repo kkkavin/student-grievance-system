@@ -13,7 +13,7 @@ except ImportError:
     from app.db.models import AuditLog
     from app.routers.dependencies import require_super_admin
 
-router = APIRouter(prefix="/api/admin", tags=["Audit Logs"])
+router = APIRouter()
 
 
 @router.get("/audit-logs")

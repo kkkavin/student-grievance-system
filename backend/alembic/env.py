@@ -16,8 +16,8 @@ from alembic import context
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from backend.db.base import Base, get_database_url
-import backend.db.models  # Ensure all models are registered in Base.metadata
+from backend.app.db.session import Base, get_database_url
+import backend.app.db.models  # Ensure all models are registered in Base.metadata
 
 config = context.config
 
